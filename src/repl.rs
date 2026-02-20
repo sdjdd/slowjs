@@ -1,10 +1,8 @@
-/// REPL (Read-Eval-Print Loop) for the JavaScript interpreter
 use crate::eval::{Context, eval_program};
 use crate::lexer::tokenize;
 use crate::parser::parse;
 use rustyline::{DefaultEditor, error::ReadlineError};
 
-/// Run the REPL interactively
 pub fn run() {
     println!("Welcome to SlowJS");
 
@@ -15,7 +13,6 @@ pub fn run() {
     loop {
         match rl.readline("> ") {
             Ok(input) => {
-                // Add to history
                 let _ = rl.add_history_entry(input.as_str());
 
                 let input = input.trim();
