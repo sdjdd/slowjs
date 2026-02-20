@@ -1,6 +1,7 @@
 pub enum Value {
     Null,
     Boolean(bool),
+    Number(f64),
     String(String),
 }
 
@@ -9,6 +10,13 @@ impl std::fmt::Display for Value {
         match self {
             Value::Null => write!(f, "null"),
             Value::Boolean(b) => write!(f, "{}", if *b { "true" } else { "false" }),
+            Value::Number(n) => {
+                if n.fract() == 0.0 {
+                    write!(f, "{:.0}", n)
+                } else {
+                    write!(f, "{}", n)
+                }
+            }
             Value::String(s) => write!(f, "{s}"),
         }
     }
@@ -18,6 +26,7 @@ impl std::fmt::Display for Value {
 pub enum Literal {
     Null,
     Boolean(bool),
+    Number(f64),
     String(String),
 }
 

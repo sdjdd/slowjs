@@ -25,7 +25,7 @@ pub fn run() {
                 }
 
                 match process_input(input, &mut context) {
-                    Ok(Some(value)) => println!("{}", value),
+                    Ok(Some(value)) => println!("{value}"),
                     Ok(None) => {}
                     Err(e) => println!("Error: {}", e),
                 }

@@ -49,6 +49,7 @@ fn eval_literal(literal: &Literal, _ctx: &mut Context) -> Result<Value, EvalErro
     match literal {
         Literal::Null => Ok(Value::Null),
         Literal::Boolean(b) => Ok(Value::Boolean(*b)),
+        Literal::Number(n) => Ok(Value::Number(*n)),
         Literal::String(s) => Ok(Value::String(s.clone())),
     }
 }
