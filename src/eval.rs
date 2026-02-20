@@ -62,6 +62,10 @@ fn eval_binary(
             BinaryOperator::Multiply => Ok(Value::Number(l * r)),
             BinaryOperator::Divide => Ok(Value::Number(l / r)),
         },
+        (Value::String(l), Value::String(r)) => match op {
+            BinaryOperator::Add => Ok(Value::String(l + &r)),
+            _ => unimplemented!(),
+        },
         _ => unimplemented!(),
     }
 }
