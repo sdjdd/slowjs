@@ -115,14 +115,7 @@ impl Parser {
                 return Err(ParseError::UnexpectedEof);
             }
 
-            let next_prec = self
-                .current()
-                .ok()
-                .and_then(get_operator_precedence)
-                .map(|(_, p)| p)
-                .unwrap_or(0);
-
-            let right = self.parse_infix_expr(next_prec + 1)?;
+            let right = self.parse_infix_expr(prec + 1)?;
 
             left = Expression::Binary(Box::new(left), op, Box::new(right));
         }
