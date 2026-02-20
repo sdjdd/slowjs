@@ -34,7 +34,6 @@ pub fn run() {
                 continue;
             }
             Err(ReadlineError::Eof) => {
-                println!();
                 break;
             }
             Err(err) => {
