@@ -92,7 +92,7 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
 
 fn parse_number(input: &str) -> IResult<&str, TokenKind> {
     let integer_part = take_while1(|c: char| c.is_ascii_digit());
-    let fractional_part = opt(pair(char('.'), take_while1(|c: char| c.is_ascii_digit())));
+    let fractional_part = opt(pair(char('.'), take_while(|c: char| c.is_ascii_digit())));
     let number = recognize(pair(integer_part, fractional_part));
 
     map(number, |num_str: &str| {
