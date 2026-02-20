@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Expression, Literal, Program, Statement},
+    ast::{BinaryOperator, Expression, Literal, Program, Statement},
     lexer::{Token, TokenKind},
 };
 
@@ -86,7 +86,48 @@ impl Parser {
     }
 
     pub fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_primary()
+        self.parse_infix_expr(0)
+    }
+
+    fn parse_infix_expr(&mut self, precedence: usize) -> Result<Expression, ParseError> {
+        let mut left = self.parse_primary()?;
+
+        loop {
+            let current_kind = match self.current() {
+                Ok(kind) => kind,
+                Err(ParseError::UnexpectedEof) => break,
+                Err(e) => return Err(e),
+            };
+
+            let (op, prec) = match get_operator_precedence(current_kind) {
+                Some(result) => result,
+                None => break,
+            };
+
+            if prec < precedence {
+                break;
+            }
+
+            self.advance()?;
+
+            if matches!(self.current(), Ok(TokenKind::Eof)) {
+                // No right-hand
+                return Err(ParseError::UnexpectedEof);
+            }
+
+            let next_prec = self
+                .current()
+                .ok()
+                .and_then(get_operator_precedence)
+                .map(|(_, p)| p)
+                .unwrap_or(0);
+
+            let right = self.parse_infix_expr(next_prec + 1)?;
+
+            left = Expression::Binary(Box::new(left), op, Box::new(right));
+        }
+
+        Ok(left)
     }
 
     pub fn parse_primary(&mut self) -> Result<Expression, ParseError> {
@@ -115,6 +156,16 @@ impl Parser {
                 found: format!("{:?}", self.current()?),
             }),
         }
+    }
+}
+
+fn get_operator_precedence(kind: &TokenKind) -> Option<(BinaryOperator, usize)> {
+    match kind {
+        TokenKind::Plus => Some((BinaryOperator::Add, 5)),
+        TokenKind::Minus => Some((BinaryOperator::Subtract, 5)),
+        TokenKind::Star => Some((BinaryOperator::Multiply, 6)),
+        TokenKind::Slash => Some((BinaryOperator::Divide, 6)),
+        _ => None,
     }
 }
 

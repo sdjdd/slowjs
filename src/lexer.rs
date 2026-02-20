@@ -14,6 +14,12 @@ pub enum TokenKind {
     Number(f64),
     StringLit(String),
 
+    // Operators
+    Plus,  // +
+    Minus, // -
+    Star,  // *
+    Slash, // /
+
     Semi, // ;
 
     Eof,
@@ -85,6 +91,10 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     }
 
     match input.chars().next().unwrap() {
+        '+' => Ok((input[1..].trim_start(), TokenKind::Plus)),
+        '-' => Ok((input[1..].trim_start(), TokenKind::Minus)),
+        '*' => Ok((input[1..].trim_start(), TokenKind::Star)),
+        '/' => Ok((input[1..].trim_start(), TokenKind::Slash)),
         ';' => Ok((input[1..].trim_start(), TokenKind::Semi)),
         c => Err(LexerError::UnexpectedToken(c.to_string())),
     }

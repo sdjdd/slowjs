@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Literal, Program, Statement, Value};
+use crate::ast::{BinaryOperator, Expression, Literal, Program, Statement, Value};
 
 #[derive(Debug)]
 pub enum EvalError {}
@@ -42,6 +42,27 @@ fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, 
 fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalError> {
     match expr {
         Expression::Literal(literal) => eval_literal(literal, ctx),
+        Expression::Binary(left, op, right) => eval_binary(left, op, right, ctx),
+    }
+}
+
+fn eval_binary(
+    left: &Expression,
+    op: &BinaryOperator,
+    right: &Expression,
+    ctx: &mut Context,
+) -> Result<Value, EvalError> {
+    let left_val = eval_expression(left, ctx)?;
+    let right_val = eval_expression(right, ctx)?;
+
+    match (left_val, right_val) {
+        (Value::Number(l), Value::Number(r)) => match op {
+            BinaryOperator::Add => Ok(Value::Number(l + r)),
+            BinaryOperator::Subtract => Ok(Value::Number(l - r)),
+            BinaryOperator::Multiply => Ok(Value::Number(l * r)),
+            BinaryOperator::Divide => Ok(Value::Number(l / r)),
+        },
+        _ => unimplemented!(),
     }
 }
 

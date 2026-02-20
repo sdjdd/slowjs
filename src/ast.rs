@@ -11,6 +11,16 @@ impl std::fmt::Display for Value {
             Value::Null => write!(f, "null"),
             Value::Boolean(b) => write!(f, "{}", if *b { "true" } else { "false" }),
             Value::Number(n) => {
+                if n.is_infinite() {
+                    return if n.is_sign_positive() {
+                        write!(f, "Infinity")
+                    } else {
+                        write!(f, "-Infinity")
+                    };
+                }
+                if n.is_nan() {
+                    return write!(f, "NaN");
+                }
                 if n.fract() == 0.0 {
                     write!(f, "{:.0}", n)
                 } else {
@@ -30,8 +40,17 @@ pub enum Literal {
     String(String),
 }
 
+pub enum BinaryOperator {
+    Add,      // +
+    Subtract, // -
+    Multiply, // *
+    Divide,   // /
+}
+
 pub enum Expression {
     Literal(Literal),
+    // TODO: Replace Box with Rc?
+    Binary(Box<Expression>, BinaryOperator, Box<Expression>),
 }
 
 pub enum Statement {
