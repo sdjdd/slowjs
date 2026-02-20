@@ -5,7 +5,10 @@ use crate::{
 
 #[derive(Debug)]
 pub enum ParseError {
-    UnexpectedToken { expected: String, found: String },
+    UnexpectedToken {
+        expected: Option<String>,
+        found: String,
+    },
     UnexpectedEof,
 }
 
@@ -13,13 +16,17 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseError::UnexpectedToken { expected, found } => {
-                write!(
-                    f,
-                    "Unexpected token: expected {}, found {}",
-                    expected, found
-                )
+                if let Some(expected) = expected {
+                    write!(
+                        f,
+                        "Unexpected token: expected {}, found {}",
+                        expected, found
+                    )
+                } else {
+                    write!(f, "Unexpected token: {}", found)
+                }
             }
-            ParseError::UnexpectedEof => write!(f, "Unexpected end of input"),
+            ParseError::UnexpectedEof => write!(f, "Unexpected EOF"),
         }
     }
 }
@@ -104,7 +111,7 @@ impl Parser {
                 Ok(Expression::Literal(Literal::String(s)))
             }
             _ => Err(ParseError::UnexpectedToken {
-                expected: "expression".to_string(),
+                expected: None,
                 found: format!("{:?}", self.current()?),
             }),
         }
