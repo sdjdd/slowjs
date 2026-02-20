@@ -1,6 +1,6 @@
 use crate::{
     ast::{BinaryOperator, Expression, Literal, Program, Statement},
-    lexer::{Token, TokenKind},
+    lexer::{LexerError, Token, TokenKind},
 };
 
 #[derive(Debug)]
@@ -32,6 +32,18 @@ impl std::fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
+
+impl From<LexerError> for ParseError {
+    fn from(err: LexerError) -> Self {
+        match err {
+            LexerError::UnexpectedToken(t) => ParseError::UnexpectedToken {
+                expected: None,
+                found: t.to_string(),
+            },
+            LexerError::Eof => ParseError::UnexpectedEof,
+        }
+    }
+}
 
 pub struct Parser {
     tokens: Vec<Token>,
