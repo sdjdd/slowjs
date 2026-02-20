@@ -1,20 +1,11 @@
-use crate::{
-    ast::{Expression, Literal, Program, Statement, Value},
-    features::FeatureRegistry,
-};
+use crate::ast::{Expression, Literal, Program, Statement, Value};
 
 #[derive(Debug)]
-pub enum EvalError {
-    UnsupportedLiteral(String),
-}
+pub enum EvalError {}
 
 impl std::fmt::Display for EvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EvalError::UnsupportedLiteral(literal) => {
-                write!(f, "Unsupported literal type: {}", literal)
-            }
-        }
+        write!(f, "EvalError")
     }
 }
 
@@ -30,15 +21,11 @@ impl Context {
     }
 }
 
-pub fn eval_program(
-    program: &Program,
-    ctx: &mut Context,
-    features: &FeatureRegistry,
-) -> Result<Option<Value>, EvalError> {
+pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Option<Value>, EvalError> {
     let mut last_value = None;
 
     for stmt in &program.body {
-        if let Some(value) = eval_statement(stmt, ctx, features)? {
+        if let Some(value) = eval_statement(stmt, ctx)? {
             last_value = Some(value);
         }
     }
@@ -46,39 +33,21 @@ pub fn eval_program(
     Ok(last_value)
 }
 
-fn eval_statement(
-    stmt: &Statement,
-    ctx: &mut Context,
-    features: &FeatureRegistry,
-) -> Result<Option<Value>, EvalError> {
-    if let Some(value) = features.eval_statement(stmt, ctx)? {
-        return Ok(Some(value));
-    }
-
+fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, EvalError> {
     match stmt {
-        Statement::Expression(expr) => Ok(Some(eval_expression(expr, ctx, features)?)),
+        Statement::Expression(expr) => Ok(Some(eval_expression(expr, ctx)?)),
     }
 }
 
-fn eval_expression(
-    expr: &Expression,
-    ctx: &mut Context,
-    features: &FeatureRegistry,
-) -> Result<Value, EvalError> {
+fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalError> {
     match expr {
-        Expression::Literal(literal) => eval_literal(literal, ctx, features),
+        Expression::Literal(literal) => eval_literal(literal, ctx),
     }
 }
 
-fn eval_literal(
-    literal: &Literal,
-    ctx: &mut Context,
-    features: &FeatureRegistry,
-) -> Result<Value, EvalError> {
-    if let Some(value) = features.eval_literal(literal, ctx)? {
-        return Ok(value);
+fn eval_literal(literal: &Literal, _ctx: &mut Context) -> Result<Value, EvalError> {
+    match literal {
+        Literal::Null => Ok(Value::Null),
+        Literal::String(s) => Ok(Value::String(s.clone())),
     }
-
-    // No feature could evaluate this literal
-    Err(EvalError::UnsupportedLiteral(format!("{:?}", literal)))
 }

@@ -1,6 +1,5 @@
 /// REPL (Read-Eval-Print Loop) for the JavaScript interpreter
 use crate::eval::{Context, eval_program};
-use crate::features::FeatureRegistry;
 use crate::lexer::tokenize;
 use crate::parser::parse;
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -10,7 +9,6 @@ pub fn run() {
     println!("Welcome to SlowJS");
 
     let mut context = Context::new();
-    let features = FeatureRegistry::new();
 
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
 
@@ -26,7 +24,7 @@ pub fn run() {
                     continue;
                 }
 
-                match process_input(input, &mut context, &features) {
+                match process_input(input, &mut context) {
                     Ok(Some(value)) => println!("{}", value),
                     Ok(None) => {}
                     Err(e) => println!("Error: {}", e),
@@ -50,13 +48,12 @@ pub fn run() {
 fn process_input(
     input: &str,
     context: &mut Context,
-    features: &FeatureRegistry,
 ) -> Result<Option<crate::ast::Value>, Box<dyn std::error::Error>> {
     let tokens = tokenize(input)?;
 
     let program = parse(tokens)?;
 
-    let result = eval_program(&program, context, features)?;
+    let result = eval_program(&program, context)?;
 
     Ok(result)
 }

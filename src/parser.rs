@@ -1,6 +1,5 @@
 use crate::{
-    ast::{Expression, Program, Statement},
-    features::FeatureRegistry,
+    ast::{Expression, Literal, Program, Statement},
     lexer::{Token, TokenKind},
 };
 
@@ -52,7 +51,7 @@ impl Parser {
         Ok(())
     }
 
-    pub fn parse_program(&mut self, features: &FeatureRegistry) -> Result<Program, ParseError> {
+    pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
 
         while !matches!(self.current()?, TokenKind::Eof) {
@@ -61,19 +60,15 @@ impl Parser {
                 self.advance()?;
                 continue;
             }
-            let stmt = self.parse_statement(features)?;
+            let stmt = self.parse_statement()?;
             body.push(stmt);
         }
 
         Ok(Program { body })
     }
 
-    pub fn parse_statement(&mut self, features: &FeatureRegistry) -> Result<Statement, ParseError> {
-        if let Some(stmt) = features.parse_statement(self)? {
-            return Ok(stmt);
-        }
-
-        let expr = self.parse_expression(features)?;
+    pub fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+        let expr = self.parse_expression()?;
 
         // Consume optional semicolon
         if matches!(self.current()?, TokenKind::Semi) {
@@ -83,27 +78,30 @@ impl Parser {
         Ok(Statement::Expression(expr))
     }
 
-    pub fn parse_expression(
-        &mut self,
-        features: &FeatureRegistry,
-    ) -> Result<Expression, ParseError> {
-        self.parse_primary(features)
+    pub fn parse_expression(&mut self) -> Result<Expression, ParseError> {
+        self.parse_primary()
     }
 
-    pub fn parse_primary(&mut self, features: &FeatureRegistry) -> Result<Expression, ParseError> {
-        if let Some(expr) = features.parse_primary(self)? {
-            return Ok(expr);
+    pub fn parse_primary(&mut self) -> Result<Expression, ParseError> {
+        match self.current()? {
+            TokenKind::Null => {
+                self.advance()?;
+                Ok(Expression::Literal(Literal::Null))
+            }
+            TokenKind::StringLit(s) => {
+                let s = s.clone();
+                self.advance()?;
+                Ok(Expression::Literal(Literal::String(s)))
+            }
+            _ => Err(ParseError::UnexpectedToken {
+                expected: "expression".to_string(),
+                found: format!("{:?}", self.current()?),
+            }),
         }
-
-        Err(ParseError::UnexpectedToken {
-            expected: "expression".to_string(),
-            found: format!("{:?}", self.current()?),
-        })
     }
 }
 
 pub fn parse(tokens: Vec<Token>) -> Result<Program, ParseError> {
-    let features = FeatureRegistry::new();
     let mut parser = Parser::new(tokens);
-    parser.parse_program(&features)
+    parser.parse_program()
 }
