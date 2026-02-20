@@ -88,6 +88,11 @@ impl Parser {
                 self.advance()?;
                 Ok(Expression::Literal(Literal::Null))
             }
+            TokenKind::Boolean(b) => {
+                let b = *b;
+                self.advance()?;
+                Ok(Expression::Literal(Literal::Boolean(b)))
+            }
             TokenKind::StringLit(s) => {
                 let s = s.clone();
                 self.advance()?;

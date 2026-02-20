@@ -48,6 +48,7 @@ fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalEr
 fn eval_literal(literal: &Literal, _ctx: &mut Context) -> Result<Value, EvalError> {
     match literal {
         Literal::Null => Ok(Value::Null),
+        Literal::Boolean(b) => Ok(Value::Boolean(*b)),
         Literal::String(s) => Ok(Value::String(s.clone())),
     }
 }

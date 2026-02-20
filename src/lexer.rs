@@ -10,6 +10,7 @@ use nom::{
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
     Null,
+    Boolean(bool),
     StringLit(String),
 
     Semi, // ;
@@ -109,6 +110,8 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
 
     map(recognize(pair(first, rest)), |ident: &str| match ident {
         "null" => TokenKind::Null,
+        "true" => TokenKind::Boolean(true),
+        "false" => TokenKind::Boolean(false),
         _ => TokenKind::Unknown,
     })(input)
 }
