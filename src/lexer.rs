@@ -1,14 +1,16 @@
 use nom::{
-    IResult,
-    bytes::complete::take_while,
-    character::complete::one_of,
-    combinator::{map, recognize},
-    sequence::pair,
+    IResult, Parser,
+    branch::alt,
+    bytes::complete::{escaped, is_not, take_while},
+    character::complete::{anychar, char, one_of},
+    combinator::{map, opt, recognize},
+    sequence::{delimited, pair},
 };
 
 #[derive(Debug, PartialEq)]
 pub enum TokenKind {
     Null,
+    StringLit(String),
 
     Semi, // ;
 
@@ -28,14 +30,14 @@ impl Token {
 
 #[derive(Debug)]
 pub enum LexerError {
-    UnexpectedCharacter(char),
+    UnexpectedToken(String),
     Eof,
 }
 
 impl std::fmt::Display for LexerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexerError::UnexpectedCharacter(c) => write!(f, "Unexpected character: '{}'", c),
+            LexerError::UnexpectedToken(t) => write!(f, "Unexpected token: {t}"),
             LexerError::Eof => write!(f, "Unexpected end of input"),
         }
     }
@@ -64,6 +66,10 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         return Err(LexerError::Eof);
     }
 
+    if input.starts_with('"') || input.starts_with('\'') {
+        return parse_string(input).map_err(|_| LexerError::UnexpectedToken(input.to_string()));
+    }
+
     if input.chars().next().unwrap().is_alphabetic()
         || input.starts_with('_')
         || input.starts_with('$')
@@ -73,8 +79,28 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
 
     match input.chars().next().unwrap() {
         ';' => Ok((input[1..].trim_start(), TokenKind::Semi)),
-        c => Err(LexerError::UnexpectedCharacter(c)),
+        c => Err(LexerError::UnexpectedToken(c.to_string())),
     }
+}
+
+fn parse_string(input: &str) -> IResult<&str, TokenKind> {
+    let double_quoted = delimited(
+        char('"'),
+        opt(escaped(is_not("\"\\"), '\\', anychar))
+            .map(|s: Option<&str>| s.unwrap_or("").to_string()),
+        char('"'),
+    );
+
+    let single_quoted = delimited(
+        char('\''),
+        opt(escaped(is_not("'\\"), '\\', anychar))
+            .map(|s: Option<&str>| s.unwrap_or("").to_string()),
+        char('\''),
+    );
+
+    map(alt((double_quoted, single_quoted)), |s: String| {
+        TokenKind::StringLit(s)
+    })(input)
 }
 
 fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
@@ -95,5 +121,11 @@ mod tests {
     fn test_null_literal() {
         let tokens = tokenize("null").unwrap();
         assert_eq!(tokens[0].kind, TokenKind::Null);
+    }
+
+    #[test]
+    fn test_string_literal() {
+        let tokens = tokenize(r#""hello""#).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::StringLit("hello".to_string()));
     }
 }

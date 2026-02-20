@@ -16,6 +16,11 @@ impl Feature for LiteralFeature {
                 parser.advance()?;
                 Ok(Some(Expression::Literal(Literal::Null)))
             }
+            Ok(TokenKind::StringLit(s)) => {
+                let s = s.clone();
+                parser.advance()?;
+                Ok(Some(Expression::Literal(Literal::String(s))))
+            }
             _ => Ok(None),
         }
     }
@@ -23,6 +28,7 @@ impl Feature for LiteralFeature {
     fn eval_literal(literal: &Literal, _ctx: &mut Context) -> EvalResult<Option<Value>> {
         match literal {
             Literal::Null => Ok(Some(Value::Null)),
+            Literal::String(s) => Ok(Some(Value::String(s.clone()))),
         }
     }
 }
