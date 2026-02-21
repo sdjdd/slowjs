@@ -16,6 +16,11 @@ pub enum TokenKind {
     StringLit(String),
     Ident(String),
 
+    // Keywords
+    Var,
+    Let,
+    Const,
+
     // Operators
     Plus,  // +
     Minus, // -
@@ -27,6 +32,7 @@ pub enum TokenKind {
     RBrace, // }
     Colon,  // :
     Comma,  // ,
+    Assign, // =
 
     Eof,
 }
@@ -89,6 +95,7 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         '}' => (&input[1..], TokenKind::RBrace),
         ':' => (&input[1..], TokenKind::Colon),
         ',' => (&input[1..], TokenKind::Comma),
+        '=' => (&input[1..], TokenKind::Assign),
         c => return Err(LexerError(c.to_string())),
     };
 
@@ -133,6 +140,9 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
         "null" => TokenKind::Null,
         "true" => TokenKind::Boolean(true),
         "false" => TokenKind::Boolean(false),
+        "var" => TokenKind::Var,
+        "let" => TokenKind::Let,
+        "const" => TokenKind::Const,
         _ => TokenKind::Ident(ident.to_string()),
     })(input)
 }

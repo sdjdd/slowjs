@@ -1,7 +1,8 @@
 use crate::{
     ast::{
-        BinaryOperator, Expression, Identifier, Literal, ObjectExpression, Program, Property,
-        PropertyKey, PropertyKind, Statement,
+        BinaryOperator, Declaration, Expression, Identifier, Literal, ObjectExpression, Program,
+        Property, PropertyKey, PropertyKind, Statement, VariableDeclaration,
+        VariableDeclarationKind, VariableDeclarator,
     },
     lexer::{LexerError, Token, TokenKind},
 };
@@ -57,6 +58,15 @@ impl Parser {
         }
     }
 
+    fn consume(&mut self, expected: TokenKind) -> bool {
+        if self.current() == &expected {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
 
@@ -74,6 +84,7 @@ impl Parser {
                 self.advance();
                 Ok(Statement::EmptyStatement)
             }
+            TokenKind::Var | TokenKind::Let | TokenKind::Const => self.parse_declaration(),
             TokenKind::LBrace => {
                 let pos = self.pos;
                 match self.parse_object_expression() {
@@ -86,6 +97,57 @@ impl Parser {
             }
             _ => self.parse_expression_statement(),
         }
+    }
+
+    fn parse_declaration(&mut self) -> Result<Statement, ParseError> {
+        let kind = match self.current() {
+            TokenKind::Var => VariableDeclarationKind::Var,
+            TokenKind::Let => VariableDeclarationKind::Var,
+            TokenKind::Const => VariableDeclarationKind::Var,
+            _ => unreachable!(),
+        };
+        self.advance();
+
+        let mut declarations = Vec::new();
+        loop {
+            let decl = self.parse_variable_declarator()?;
+            declarations.push(decl);
+
+            if !self.consume(TokenKind::Comma) {
+                break;
+            }
+        }
+
+        self.expect(TokenKind::Semi)?;
+
+        Ok(Statement::Declaration(Declaration::VariableDeclaration(
+            VariableDeclaration { declarations, kind },
+        )))
+    }
+
+    fn parse_variable_declarator(&mut self) -> Result<VariableDeclarator, ParseError> {
+        let id = match self.current() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Identifier { name }
+            }
+            _ => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: None,
+                    found: self.current().clone(),
+                });
+            }
+        };
+
+        let init = if matches!(self.current(), TokenKind::Assign) {
+            self.advance();
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+
+        Ok(VariableDeclarator { id, init })
     }
 
     fn parse_block_statement(&mut self) -> Result<Statement, ParseError> {

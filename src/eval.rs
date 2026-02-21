@@ -1,6 +1,7 @@
 use crate::ast::{
-    BinaryExpression, BinaryOperator, BlockStatement, Expression, ExpressionStatement, Identifier,
-    Literal, ObjectExpression, Program, PropertyKey, PropertyKind, Statement,
+    BinaryExpression, BinaryOperator, BlockStatement, Declaration, Expression, ExpressionStatement,
+    Identifier, Literal, ObjectExpression, Program, PropertyKey, PropertyKind, Statement,
+    VariableDeclaration,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -114,38 +115,48 @@ pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Value, EvalE
     let mut last_value = Value::Undefined;
 
     for stmt in &program.body {
-        if let Some(value) = eval_statement(stmt, &env)? {
-            last_value = value;
-        }
+        last_value = eval_statement(stmt, &env)?;
     }
 
     Ok(last_value)
 }
 
-fn eval_statement(
-    stmt: &Statement,
-    env: &Rc<RefCell<Environment>>,
-) -> Result<Option<Value>, EvalError> {
+fn eval_statement(stmt: &Statement, env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError> {
     match stmt {
         Statement::ExpressionStatement(ExpressionStatement { expression }) => {
-            Ok(Some(eval_expression(&expression, env)?))
+            eval_expression(&expression, env)
         }
         Statement::BlockStatement(BlockStatement { body }) => eval_block(body, env),
-        Statement::EmptyStatement => Ok(None),
+        Statement::EmptyStatement => Ok(Value::Undefined),
+        Statement::Declaration(Declaration::VariableDeclaration(decl)) => {
+            eval_variable_declaration(decl, env)
+        }
     }
 }
 
 fn eval_block(
     statements: &[Statement],
     env: &Rc<RefCell<Environment>>,
-) -> Result<Option<Value>, EvalError> {
-    let mut last_value = None;
+) -> Result<Value, EvalError> {
+    let mut last_value = Value::Undefined;
     for stmt in statements {
-        if let Some(value) = eval_statement(stmt, env)? {
-            last_value = Some(value);
-        }
+        last_value = eval_statement(stmt, env)?;
     }
     Ok(last_value)
+}
+
+fn eval_variable_declaration(
+    decl: &VariableDeclaration,
+    env: &Rc<RefCell<Environment>>,
+) -> Result<Value, EvalError> {
+    for declarator in &decl.declarations {
+        let value = match &declarator.init {
+            Some(init) => eval_expression(init, env)?,
+            None => Value::Undefined,
+        };
+        env.borrow_mut().set(declarator.id.name.clone(), value);
+    }
+    Ok(Value::Undefined)
 }
 
 fn eval_expression(expr: &Expression, env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError> {

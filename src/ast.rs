@@ -6,6 +6,7 @@ pub enum Statement {
     ExpressionStatement(ExpressionStatement),
     BlockStatement(BlockStatement),
     EmptyStatement,
+    Declaration(Declaration),
 }
 
 impl Statement {
@@ -20,6 +21,24 @@ impl Statement {
 
 pub struct ExpressionStatement {
     pub expression: Expression,
+}
+
+pub enum Declaration {
+    VariableDeclaration(VariableDeclaration),
+}
+
+pub struct VariableDeclaration {
+    pub declarations: Vec<VariableDeclarator>,
+    pub kind: VariableDeclarationKind,
+}
+
+pub struct VariableDeclarator {
+    pub id: Identifier,
+    pub init: Option<Expression>,
+}
+
+pub enum VariableDeclarationKind {
+    Var,
 }
 
 pub struct BlockStatement {
