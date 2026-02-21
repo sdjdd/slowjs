@@ -1,4 +1,4 @@
-use crate::eval::{Context, eval_program};
+use crate::eval::{Context, Value, eval_program};
 use crate::lexer::tokenize;
 use crate::parser::{ParseError, parse};
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -60,10 +60,7 @@ pub fn run() {
     }
 }
 
-fn process_input(
-    input: &str,
-    context: &mut Context,
-) -> Result<Option<crate::ast::Value>, ParseError> {
+fn process_input(input: &str, context: &mut Context) -> Result<Option<Value>, ParseError> {
     let tokens = tokenize(input)?;
 
     let program = parse(tokens)?;
