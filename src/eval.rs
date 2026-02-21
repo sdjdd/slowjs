@@ -5,6 +5,7 @@ use crate::ast::{
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use thiserror::Error;
 
 #[derive(Clone)]
 pub enum Value {
@@ -43,20 +44,11 @@ impl std::fmt::Display for Value {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum EvalError {
+    #[error("ReferenceError: {0} is not defined")]
     ReferenceError(String),
 }
-
-impl std::fmt::Display for EvalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EvalError::ReferenceError(name) => write!(f, "ReferenceError: {name} is not defined"),
-        }
-    }
-}
-
-impl std::error::Error for EvalError {}
 
 pub struct Environment {
     bindings: HashMap<String, Value>,

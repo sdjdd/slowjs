@@ -6,6 +6,7 @@ use nom::{
     combinator::{map, opt, recognize},
     sequence::{delimited, pair},
 };
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -26,7 +27,6 @@ pub enum TokenKind {
     RBrace, // }
 
     Eof,
-    Invalid,
 }
 
 pub struct Token {
@@ -39,20 +39,9 @@ impl Token {
     }
 }
 
-#[derive(Debug)]
-pub enum LexerError {
-    InvalidToken(String),
-}
-
-impl std::fmt::Display for LexerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LexerError::InvalidToken(t) => write!(f, "Invalid token: {t}"),
-        }
-    }
-}
-
-impl std::error::Error for LexerError {}
+#[derive(Debug, Error)]
+#[error("Invalid token: {0}")]
+pub struct LexerError(String);
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexerError> {
     let mut tokens = Vec::new();
@@ -76,18 +65,18 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     }
 
     if input.chars().next().unwrap().is_ascii_digit() {
-        return parse_number(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
+        return parse_number(input).map_err(|_| LexerError(input.to_string()));
     }
 
     if input.starts_with('"') || input.starts_with('\'') {
-        return parse_string(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
+        return parse_string(input).map_err(|_| LexerError(input.to_string()));
     }
 
     if input.chars().next().unwrap().is_alphabetic()
         || input.starts_with('_')
         || input.starts_with('$')
     {
-        return parse_identifier(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
+        return parse_identifier(input).map_err(|_| LexerError(input.to_string()));
     }
 
     let (input, kind) = match input.chars().next().unwrap() {
@@ -98,7 +87,7 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         ';' => (input[1..].trim_start(), TokenKind::Semi),
         '{' => (input[1..].trim_start(), TokenKind::LBrace),
         '}' => (input[1..].trim_start(), TokenKind::RBrace),
-        c => return Err(LexerError::InvalidToken(c.to_string())),
+        c => return Err(LexerError(c.to_string())),
     };
 
     Ok((input, kind))

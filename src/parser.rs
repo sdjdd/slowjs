@@ -2,37 +2,18 @@ use crate::{
     ast::{BinaryOperator, Expression, Identifier, Literal, Program, Statement},
     lexer::{LexerError, Token, TokenKind},
 };
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ParseError {
+    #[error("Unexpected token: {found:?}")]
     UnexpectedToken {
         #[allow(unused)]
         expected: Option<TokenKind>,
         found: TokenKind,
     },
-}
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::UnexpectedToken { found, .. } => {
-                write!(f, "Unexpected token: {:?}", found)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-impl From<LexerError> for ParseError {
-    fn from(err: LexerError) -> Self {
-        match err {
-            LexerError::InvalidToken(_) => ParseError::UnexpectedToken {
-                expected: None,
-                found: TokenKind::Invalid,
-            },
-        }
-    }
+    #[error(transparent)]
+    Lexer(#[from] LexerError),
 }
 
 pub struct Parser {
