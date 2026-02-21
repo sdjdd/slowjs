@@ -58,8 +58,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexerError> {
 }
 
 fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
-    let input = input.trim_start();
-
     if input.is_empty() {
         return Ok((input, TokenKind::Eof));
     }
@@ -80,13 +78,13 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     }
 
     let (input, kind) = match input.chars().next().unwrap() {
-        '+' => (input[1..].trim_start(), TokenKind::Plus),
-        '-' => (input[1..].trim_start(), TokenKind::Minus),
-        '*' => (input[1..].trim_start(), TokenKind::Star),
-        '/' => (input[1..].trim_start(), TokenKind::Slash),
-        ';' => (input[1..].trim_start(), TokenKind::Semi),
-        '{' => (input[1..].trim_start(), TokenKind::LBrace),
-        '}' => (input[1..].trim_start(), TokenKind::RBrace),
+        '+' => (&input[1..], TokenKind::Plus),
+        '-' => (&input[1..], TokenKind::Minus),
+        '*' => (&input[1..], TokenKind::Star),
+        '/' => (&input[1..], TokenKind::Slash),
+        ';' => (&input[1..], TokenKind::Semi),
+        '{' => (&input[1..], TokenKind::LBrace),
+        '}' => (&input[1..], TokenKind::RBrace),
         c => return Err(LexerError(c.to_string())),
     };
 
