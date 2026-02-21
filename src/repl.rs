@@ -1,5 +1,5 @@
 use crate::eval::{Context, Value, eval_program};
-use crate::lexer::tokenize;
+use crate::lexer::{TokenKind, tokenize};
 use crate::parser::{ParseError, parse};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
@@ -36,7 +36,13 @@ pub fn run() {
                     Ok(Some(value)) => println!("{value}"),
                     Ok(None) => {}
                     Err(e) => {
-                        if matches!(&e, ParseError::UnexpectedEof) {
+                        if matches!(
+                            e,
+                            ParseError::UnexpectedToken {
+                                found: TokenKind::Eof,
+                                ..
+                            }
+                        ) {
                             continue;
                         }
                         println!("Error: {e}");
@@ -65,7 +71,7 @@ fn process_input(input: &str, context: &mut Context) -> Result<Option<Value>, Pa
 
     let program = parse(tokens)?;
 
-    let result = eval_program(&program, context).map_err(|_| ParseError::UnexpectedEof)?;
+    let result = eval_program(&program, context).unwrap();
 
     Ok(result)
 }

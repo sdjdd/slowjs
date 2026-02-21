@@ -6,27 +6,18 @@ use crate::{
 #[derive(Debug)]
 pub enum ParseError {
     UnexpectedToken {
-        expected: Option<String>,
-        found: String,
+        #[allow(unused)]
+        expected: Option<TokenKind>,
+        found: TokenKind,
     },
-    UnexpectedEof,
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::UnexpectedToken { expected, found } => {
-                if let Some(expected) = expected {
-                    write!(
-                        f,
-                        "Unexpected token: expected {}, found {}",
-                        expected, found
-                    )
-                } else {
-                    write!(f, "Unexpected token: {}", found)
-                }
+            ParseError::UnexpectedToken { found, .. } => {
+                write!(f, "Unexpected token: {:?}", found)
             }
-            ParseError::UnexpectedEof => write!(f, "Unexpected EOF"),
         }
     }
 }
@@ -36,11 +27,10 @@ impl std::error::Error for ParseError {}
 impl From<LexerError> for ParseError {
     fn from(err: LexerError) -> Self {
         match err {
-            LexerError::UnexpectedToken(t) => ParseError::UnexpectedToken {
+            LexerError::InvalidToken(_) => ParseError::UnexpectedToken {
                 expected: None,
-                found: t.to_string(),
+                found: TokenKind::Invalid,
             },
-            LexerError::Eof => ParseError::UnexpectedEof,
         }
     }
 }
@@ -55,28 +45,26 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    pub fn current(&self) -> Result<&TokenKind, ParseError> {
+    pub fn current(&self) -> &TokenKind {
         self.tokens
             .get(self.pos)
             .map(|t| &t.kind)
-            .ok_or(ParseError::UnexpectedEof)
+            .unwrap_or(&TokenKind::Eof)
     }
 
-    pub fn advance(&mut self) -> Result<(), ParseError> {
-        if self.pos >= self.tokens.len() {
-            return Err(ParseError::UnexpectedEof);
+    pub fn advance(&mut self) {
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
         }
-        self.pos += 1;
-        Ok(())
     }
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
 
-        while !matches!(self.current()?, TokenKind::Eof) {
+        while !matches!(self.current(), TokenKind::Eof) {
             // Skip semicolons between statements
-            if matches!(self.current()?, TokenKind::Semi) {
-                self.advance()?;
+            if matches!(self.current(), TokenKind::Semi) {
+                self.advance();
                 continue;
             }
             let stmt = self.parse_statement()?;
@@ -90,8 +78,8 @@ impl Parser {
         let expr = self.parse_expression()?;
 
         // Consume optional semicolon
-        if matches!(self.current()?, TokenKind::Semi) {
-            self.advance()?;
+        if matches!(self.current(), TokenKind::Semi) {
+            self.advance();
         }
 
         Ok(Statement::ExpressionStatement { expression: expr })
@@ -106,9 +94,8 @@ impl Parser {
 
         loop {
             let current_kind = match self.current() {
-                Ok(kind) => kind,
-                Err(ParseError::UnexpectedEof) => break,
-                Err(e) => return Err(e),
+                TokenKind::Eof => break,
+                kind => kind,
             };
 
             let (op, prec) = match get_operator_precedence(current_kind) {
@@ -120,12 +107,7 @@ impl Parser {
                 break;
             }
 
-            self.advance()?;
-
-            if matches!(self.current(), Ok(TokenKind::Eof)) {
-                // No right-hand
-                return Err(ParseError::UnexpectedEof);
-            }
+            self.advance();
 
             let right = self.parse_infix_expr(prec + 1)?;
 
@@ -140,29 +122,29 @@ impl Parser {
     }
 
     pub fn parse_primary(&mut self) -> Result<Expression, ParseError> {
-        match self.current()? {
+        match self.current() {
             TokenKind::Null => {
-                self.advance()?;
+                self.advance();
                 Ok(Expression::Literal(Literal::Null))
             }
             TokenKind::Boolean(b) => {
                 let b = *b;
-                self.advance()?;
+                self.advance();
                 Ok(Expression::Literal(Literal::Boolean(b)))
             }
             TokenKind::Number(n) => {
                 let n = *n;
-                self.advance()?;
+                self.advance();
                 Ok(Expression::Literal(Literal::Number(n)))
             }
             TokenKind::StringLit(s) => {
                 let s = s.clone();
-                self.advance()?;
+                self.advance();
                 Ok(Expression::Literal(Literal::String(s)))
             }
             _ => Err(ParseError::UnexpectedToken {
                 expected: None,
-                found: format!("{:?}", self.current()?),
+                found: self.current().clone(),
             }),
         }
     }

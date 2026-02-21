@@ -7,7 +7,7 @@ use nom::{
     sequence::{delimited, pair},
 };
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Null,
     Boolean(bool),
@@ -23,7 +23,7 @@ pub enum TokenKind {
     Semi, // ;
 
     Eof,
-    Unknown,
+    Invalid,
 }
 
 pub struct Token {
@@ -38,15 +38,13 @@ impl Token {
 
 #[derive(Debug)]
 pub enum LexerError {
-    UnexpectedToken(String),
-    Eof,
+    InvalidToken(String),
 }
 
 impl std::fmt::Display for LexerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LexerError::UnexpectedToken(t) => write!(f, "Unexpected token: {t}"),
-            LexerError::Eof => write!(f, "Unexpected end of input"),
+            LexerError::InvalidToken(t) => write!(f, "Invalid token: {t}"),
         }
     }
 }
@@ -71,23 +69,22 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     let input = input.trim_start();
 
     if input.is_empty() {
-        return Err(LexerError::Eof);
+        return Ok((input, TokenKind::Eof));
     }
 
     if input.chars().next().unwrap().is_ascii_digit() {
-        return parse_number(input)
-            .map_err(|_| LexerError::UnexpectedToken(input.chars().next().unwrap().to_string()));
+        return parse_number(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
     }
 
     if input.starts_with('"') || input.starts_with('\'') {
-        return parse_string(input).map_err(|_| LexerError::UnexpectedToken(input.to_string()));
+        return parse_string(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
     }
 
     if input.chars().next().unwrap().is_alphabetic()
         || input.starts_with('_')
         || input.starts_with('$')
     {
-        return parse_identifier(input).map_err(|_| LexerError::Eof);
+        return parse_identifier(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
     }
 
     match input.chars().next().unwrap() {
@@ -96,7 +93,7 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         '*' => Ok((input[1..].trim_start(), TokenKind::Star)),
         '/' => Ok((input[1..].trim_start(), TokenKind::Slash)),
         ';' => Ok((input[1..].trim_start(), TokenKind::Semi)),
-        c => Err(LexerError::UnexpectedToken(c.to_string())),
+        c => Err(LexerError::InvalidToken(c.to_string())),
     }
 }
 
@@ -138,7 +135,7 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
         "null" => TokenKind::Null,
         "true" => TokenKind::Boolean(true),
         "false" => TokenKind::Boolean(false),
-        _ => TokenKind::Unknown,
+        _ => TokenKind::Invalid,
     })(input)
 }
 
