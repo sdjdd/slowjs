@@ -38,8 +38,7 @@ pub fn run() {
                 input_buffer.push_str(input);
 
                 match process_input(&input_buffer, &mut context) {
-                    Ok(Some(value)) => println!("{value}"),
-                    Ok(None) => {}
+                    Ok(value) => println!("{value}"),
                     Err(ReplError::ImcompleteInput) => {
                         continue;
                     }
@@ -65,7 +64,7 @@ pub fn run() {
     }
 }
 
-fn process_input(input: &str, context: &mut Context) -> Result<Option<Value>, ReplError> {
+fn process_input(input: &str, context: &mut Context) -> Result<Value, ReplError> {
     let tokens = tokenize(input).map_err(|e| ReplError::Other(e.to_string()))?;
 
     let program = parse(tokens).map_err(|e| match e {

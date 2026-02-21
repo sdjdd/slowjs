@@ -106,13 +106,13 @@ impl Context {
     }
 }
 
-pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Option<Value>, EvalError> {
-    let mut last_value = None;
+pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Value, EvalError> {
     let env = ctx.global_env();
+    let mut last_value = Value::Undefined;
 
     for stmt in &program.body {
         if let Some(value) = eval_statement(stmt, &env)? {
-            last_value = Some(value);
+            last_value = value;
         }
     }
 
