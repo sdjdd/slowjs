@@ -170,31 +170,37 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_infix_expr(0)
+        self.parse_additive_expression()
     }
 
-    fn parse_infix_expr(&mut self, precedence: usize) -> Result<Expression, ParseError> {
+    fn parse_additive_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_multiplicative_expression()?;
+
+        loop {
+            let op = match self.current() {
+                TokenKind::Plus => BinaryOperator::Add,
+                TokenKind::Minus => BinaryOperator::Subtract,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_multiplicative_expression()?;
+            left = Expression::new_binary(op, left, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression, ParseError> {
         let mut left = self.parse_primary()?;
 
         loop {
-            let current_kind = match self.current() {
-                TokenKind::Eof => break,
-                kind => kind,
+            let op = match self.current() {
+                TokenKind::Star => BinaryOperator::Multiply,
+                TokenKind::Slash => BinaryOperator::Divide,
+                _ => break,
             };
-
-            let (op, prec) = match get_operator_precedence(current_kind) {
-                Some(result) => result,
-                None => break,
-            };
-
-            if prec < precedence {
-                break;
-            }
-
             self.advance();
-
-            let right = self.parse_infix_expr(prec + 1)?;
-
+            let right = self.parse_primary()?;
             left = Expression::new_binary(op, left, right);
         }
 
@@ -306,16 +312,6 @@ impl Parser {
             value,
             kind: PropertyKind::Init,
         })
-    }
-}
-
-fn get_operator_precedence(kind: &TokenKind) -> Option<(BinaryOperator, usize)> {
-    match kind {
-        TokenKind::Plus => Some((BinaryOperator::Add, 5)),
-        TokenKind::Minus => Some((BinaryOperator::Subtract, 5)),
-        TokenKind::Star => Some((BinaryOperator::Multiply, 6)),
-        TokenKind::Slash => Some((BinaryOperator::Divide, 6)),
-        _ => None,
     }
 }
 
