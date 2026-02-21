@@ -92,12 +92,6 @@ impl Parser {
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
         let expr = self.parse_expression()?;
-
-        // Consume optional semicolon
-        if matches!(self.current(), TokenKind::Semi) {
-            self.advance();
-        }
-
         Ok(Statement::new_expression(expr))
     }
 
