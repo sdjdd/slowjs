@@ -30,6 +30,7 @@ pub enum Expression {
     Literal(Literal),
     Identifier(Identifier),
     BinaryExpression(BinaryExpression),
+    ObjectExpression(ObjectExpression),
 }
 
 impl Expression {
@@ -40,6 +41,28 @@ impl Expression {
             right: Box::new(right),
         })
     }
+}
+
+pub struct ObjectExpression {
+    pub properties: Vec<Property>,
+}
+
+pub struct Property {
+    pub key: PropertyKey,
+    pub value: Expression,
+    pub kind: PropertyKind,
+}
+
+pub enum PropertyKey {
+    Literal(Literal),
+    Identifier(Identifier),
+}
+
+#[derive(PartialEq)]
+pub enum PropertyKind {
+    Init,
+    Get,
+    Set,
 }
 
 pub struct BinaryExpression {

@@ -1,6 +1,6 @@
 use crate::ast::{
     BinaryExpression, BinaryOperator, BlockStatement, Expression, ExpressionStatement, Identifier,
-    Literal, Program, Statement,
+    Literal, ObjectExpression, Program, PropertyKey, PropertyKind, Statement,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -14,6 +14,7 @@ pub enum Value {
     Boolean(bool),
     Number(f64),
     String(String),
+    Object(HashMap<String, Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -40,6 +41,16 @@ impl std::fmt::Display for Value {
                 }
             }
             Value::String(s) => write!(f, "'{s}'"),
+            Value::Object(obj) => {
+                write!(f, "{{ ")?;
+                for (i, (key, value)) in obj.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{key}: {value}")?;
+                }
+                write!(f, " }}")
+            }
         }
     }
 }
@@ -146,6 +157,7 @@ fn eval_expression(expr: &Expression, env: &Rc<RefCell<Environment>>) -> Result<
             left,
             right,
         }) => eval_binary(left, operator, right, env),
+        Expression::ObjectExpression(obj) => eval_object_expression(obj, env),
     }
 }
 
@@ -153,6 +165,34 @@ fn eval_identifier(name: &str, env: &Rc<RefCell<Environment>>) -> Result<Value, 
     env.borrow()
         .get(name)
         .ok_or_else(|| EvalError::ReferenceError(name.to_string()))
+}
+
+fn eval_object_expression(
+    obj: &ObjectExpression,
+    env: &Rc<RefCell<Environment>>,
+) -> Result<Value, EvalError> {
+    let mut props = HashMap::new();
+
+    for property in &obj.properties {
+        // ignore getter/setter until functions are implemented
+        if property.kind != PropertyKind::Init {
+            continue;
+        }
+
+        let key = match &property.key {
+            PropertyKey::Identifier(ident) => ident.name.clone(),
+            PropertyKey::Literal(literal) => match literal {
+                Literal::String(s) => s.clone(),
+                Literal::Number(n) => n.to_string(),
+                _ => continue,
+            },
+        };
+
+        let value = eval_expression(&property.value, env)?;
+        props.insert(key, value);
+    }
+
+    Ok(Value::Object(props))
 }
 
 fn eval_binary(

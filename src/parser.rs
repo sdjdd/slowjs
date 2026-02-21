@@ -1,5 +1,8 @@
 use crate::{
-    ast::{BinaryOperator, Expression, Identifier, Literal, Program, Statement},
+    ast::{
+        BinaryOperator, Expression, Identifier, Literal, ObjectExpression, Program, Property,
+        PropertyKey, PropertyKind, Statement,
+    },
     lexer::{LexerError, Token, TokenKind},
 };
 use thiserror::Error;
@@ -71,7 +74,16 @@ impl Parser {
                 self.advance();
                 Ok(Statement::EmptyStatement)
             }
-            TokenKind::LBrace => self.parse_block_statement(),
+            TokenKind::LBrace => {
+                let pos = self.pos;
+                match self.parse_object_expression() {
+                    Ok(expr) => Ok(Statement::new_expression(expr)),
+                    Err(_) => {
+                        self.pos = pos;
+                        self.parse_block_statement()
+                    }
+                }
+            }
             _ => self.parse_expression_statement(),
         }
     }
@@ -153,11 +165,85 @@ impl Parser {
                 self.advance();
                 Ok(Expression::Identifier(Identifier { name }))
             }
+            TokenKind::LBrace => self.parse_object_expression(),
             _ => Err(ParseError::UnexpectedToken {
                 expected: None,
                 found: self.current().clone(),
             }),
         }
+    }
+
+    fn parse_object_expression(&mut self) -> Result<Expression, ParseError> {
+        self.expect(TokenKind::LBrace)?;
+
+        let mut properties = Vec::new();
+
+        // Handle empty object {}
+        if matches!(self.current(), TokenKind::RBrace) {
+            self.advance();
+            return Ok(Expression::ObjectExpression(ObjectExpression {
+                properties,
+            }));
+        }
+
+        loop {
+            let property = self.parse_property()?;
+            properties.push(property);
+
+            if matches!(self.current(), TokenKind::RBrace) {
+                break;
+            }
+
+            self.expect(TokenKind::Comma)?;
+
+            // Handle trailing comma
+            if matches!(self.current(), TokenKind::RBrace) {
+                break;
+            }
+        }
+
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(Expression::ObjectExpression(ObjectExpression {
+            properties,
+        }))
+    }
+
+    fn parse_property(&mut self) -> Result<Property, ParseError> {
+        // Parse key (identifier or literal)
+        let key = match self.current() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                PropertyKey::Identifier(Identifier { name })
+            }
+            TokenKind::StringLit(s) => {
+                let s = s.clone();
+                self.advance();
+                PropertyKey::Literal(Literal::String(s))
+            }
+            TokenKind::Number(n) => {
+                let n = *n;
+                self.advance();
+                PropertyKey::Literal(Literal::Number(n))
+            }
+            _ => {
+                return Err(ParseError::UnexpectedToken {
+                    expected: None,
+                    found: self.current().clone(),
+                });
+            }
+        };
+
+        self.expect(TokenKind::Colon)?;
+
+        let value = self.parse_expression()?;
+
+        Ok(Property {
+            key,
+            value,
+            kind: PropertyKind::Init,
+        })
     }
 }
 

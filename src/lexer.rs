@@ -25,6 +25,8 @@ pub enum TokenKind {
     Semi,   // ;
     LBrace, // {
     RBrace, // }
+    Colon,  // :
+    Comma,  // ,
 
     Eof,
 }
@@ -85,6 +87,8 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         ';' => (&input[1..], TokenKind::Semi),
         '{' => (&input[1..], TokenKind::LBrace),
         '}' => (&input[1..], TokenKind::RBrace),
+        ':' => (&input[1..], TokenKind::Colon),
+        ',' => (&input[1..], TokenKind::Comma),
         c => return Err(LexerError(c.to_string())),
     };
 
