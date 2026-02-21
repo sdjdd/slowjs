@@ -1,4 +1,7 @@
-use crate::ast::{BinaryOperator, Expression, Literal, Program, Statement};
+use crate::ast::{
+    BinaryExpression, BinaryOperator, BlockStatement, Expression, ExpressionStatement, Literal,
+    Program, Statement,
+};
 
 pub enum Value {
     Null,
@@ -69,10 +72,10 @@ pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Option<Value
 
 fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, EvalError> {
     match stmt {
-        Statement::ExpressionStatement { expression } => {
+        Statement::ExpressionStatement(ExpressionStatement { expression }) => {
             Ok(Some(eval_expression(&expression, ctx)?))
         }
-        Statement::BlockStatement { body } => eval_block(body, ctx),
+        Statement::BlockStatement(BlockStatement { body }) => eval_block(body, ctx),
         Statement::EmptyStatement => Ok(None),
     }
 }
@@ -90,11 +93,11 @@ fn eval_block(statements: &[Statement], ctx: &mut Context) -> Result<Option<Valu
 fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalError> {
     match expr {
         Expression::Literal(literal) => eval_literal(literal, ctx),
-        Expression::BinaryExpression {
+        Expression::BinaryExpression(BinaryExpression {
             operator,
             left,
             right,
-        } => eval_binary(left, operator, right, ctx),
+        }) => eval_binary(left, operator, right, ctx),
     }
 }
 

@@ -106,7 +106,7 @@ impl Parser {
 
         self.expect(TokenKind::RBrace)?;
 
-        Ok(Statement::BlockStatement { body })
+        Ok(Statement::new_block(body))
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
@@ -117,7 +117,7 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Statement::ExpressionStatement { expression: expr })
+        Ok(Statement::new_expression(expr))
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
@@ -146,11 +146,7 @@ impl Parser {
 
             let right = self.parse_infix_expr(prec + 1)?;
 
-            left = Expression::BinaryExpression {
-                operator: op,
-                left: Box::new(left),
-                right: Box::new(right),
-            }
+            left = Expression::new_binary(op, left, right);
         }
 
         Ok(left)
