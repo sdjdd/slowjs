@@ -45,20 +45,20 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    pub fn current(&self) -> &TokenKind {
+    fn current(&self) -> &TokenKind {
         self.tokens
             .get(self.pos)
             .map(|t| &t.kind)
             .unwrap_or(&TokenKind::Eof)
     }
 
-    pub fn advance(&mut self) {
+    fn advance(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
         }
     }
 
-    pub fn expect(&mut self, expected: TokenKind) -> Result<(), ParseError> {
+    fn expect(&mut self, expected: TokenKind) -> Result<(), ParseError> {
         let current = self.current();
         let matches = std::mem::discriminant(current) == std::mem::discriminant(&expected);
 
@@ -73,7 +73,7 @@ impl Parser {
         }
     }
 
-    pub fn parse_program(&mut self) -> Result<Program, ParseError> {
+    fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::Eof) {
@@ -89,7 +89,7 @@ impl Parser {
         Ok(Program { body })
     }
 
-    pub fn parse_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.current() {
             TokenKind::LBrace => self.parse_block_statement(),
             _ => self.parse_expression_statement(),
@@ -114,7 +114,7 @@ impl Parser {
         Ok(Statement::BlockStatement { body })
     }
 
-    pub fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
         let expr = self.parse_expression()?;
 
         // Consume optional semicolon
@@ -125,7 +125,7 @@ impl Parser {
         Ok(Statement::ExpressionStatement { expression: expr })
     }
 
-    pub fn parse_expression(&mut self) -> Result<Expression, ParseError> {
+    fn parse_expression(&mut self) -> Result<Expression, ParseError> {
         self.parse_infix_expr(0)
     }
 
@@ -161,7 +161,7 @@ impl Parser {
         Ok(left)
     }
 
-    pub fn parse_primary(&mut self) -> Result<Expression, ParseError> {
+    fn parse_primary(&mut self) -> Result<Expression, ParseError> {
         match self.current() {
             TokenKind::Null => {
                 self.advance();
