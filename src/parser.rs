@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BinaryOperator, Expression, Literal, Program, Statement},
+    ast::{BinaryOperator, Expression, Identifier, Literal, Program, Statement},
     lexer::{LexerError, Token, TokenKind},
 };
 
@@ -172,6 +172,11 @@ impl Parser {
                 let s = s.clone();
                 self.advance();
                 Ok(Expression::Literal(Literal::String(s)))
+            }
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(Expression::Identifier(Identifier { name }))
             }
             _ => Err(ParseError::UnexpectedToken {
                 expected: None,

@@ -3,6 +3,11 @@ use crate::lexer::{TokenKind, tokenize};
 use crate::parser::{ParseError, parse};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
+enum ReplError {
+    ImcompleteInput,
+    Other(String),
+}
+
 pub fn run() {
     println!("Welcome to SlowJS.");
     println!("Press Ctrl-D to exit.");
@@ -35,16 +40,10 @@ pub fn run() {
                 match process_input(&input_buffer, &mut context) {
                     Ok(Some(value)) => println!("{value}"),
                     Ok(None) => {}
-                    Err(e) => {
-                        if matches!(
-                            e,
-                            ParseError::UnexpectedToken {
-                                found: TokenKind::Eof,
-                                ..
-                            }
-                        ) {
-                            continue;
-                        }
+                    Err(ReplError::ImcompleteInput) => {
+                        continue;
+                    }
+                    Err(ReplError::Other(e)) => {
                         println!("Error: {e}");
                     }
                 }
@@ -66,12 +65,18 @@ pub fn run() {
     }
 }
 
-fn process_input(input: &str, context: &mut Context) -> Result<Option<Value>, ParseError> {
-    let tokens = tokenize(input)?;
+fn process_input(input: &str, context: &mut Context) -> Result<Option<Value>, ReplError> {
+    let tokens = tokenize(input).map_err(|e| ReplError::Other(e.to_string()))?;
 
-    let program = parse(tokens)?;
+    let program = parse(tokens).map_err(|e| match e {
+        ParseError::UnexpectedToken {
+            found: TokenKind::Eof,
+            ..
+        } => ReplError::ImcompleteInput,
+        e => ReplError::Other(e.to_string()),
+    })?;
 
-    let result = eval_program(&program, context).unwrap();
+    let result = eval_program(&program, context).map_err(|e| ReplError::Other(e.to_string()))?;
 
     Ok(result)
 }

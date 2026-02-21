@@ -13,6 +13,7 @@ pub enum TokenKind {
     Boolean(bool),
     Number(f64),
     StringLit(String),
+    Ident(String),
 
     // Operators
     Plus,  // +
@@ -141,7 +142,7 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
         "null" => TokenKind::Null,
         "true" => TokenKind::Boolean(true),
         "false" => TokenKind::Boolean(false),
-        _ => TokenKind::Invalid,
+        _ => TokenKind::Ident(ident.to_string()),
     })(input)
 }
 

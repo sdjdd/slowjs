@@ -28,6 +28,7 @@ pub struct BlockStatement {
 
 pub enum Expression {
     Literal(Literal),
+    Identifier(Identifier),
     BinaryExpression(BinaryExpression),
 }
 
@@ -60,4 +61,8 @@ pub enum BinaryOperator {
     Subtract, // -
     Multiply, // *
     Divide,   // /
+}
+
+pub struct Identifier {
+    pub name: String,
 }
