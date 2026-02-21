@@ -5,6 +5,7 @@ pub struct Program {
 pub enum Statement {
     ExpressionStatement { expression: Expression },
     BlockStatement { body: Vec<Statement> },
+    EmptyStatement,
 }
 
 pub enum Expression {

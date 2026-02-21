@@ -73,6 +73,7 @@ fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, 
             Ok(Some(eval_expression(&expression, ctx)?))
         }
         Statement::BlockStatement { body } => eval_block(body, ctx),
+        Statement::EmptyStatement => Ok(None),
     }
 }
 

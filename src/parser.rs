@@ -77,11 +77,6 @@ impl Parser {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::Eof) {
-            // Skip semicolons between statements
-            if matches!(self.current(), TokenKind::Semi) {
-                self.advance();
-                continue;
-            }
             let stmt = self.parse_statement()?;
             body.push(stmt);
         }
@@ -91,6 +86,10 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.current() {
+            TokenKind::Semi => {
+                self.advance();
+                Ok(Statement::EmptyStatement)
+            }
             TokenKind::LBrace => self.parse_block_statement(),
             _ => self.parse_expression_statement(),
         }
@@ -101,10 +100,6 @@ impl Parser {
 
         let mut body = Vec::new();
         while !matches!(self.current(), TokenKind::RBrace | TokenKind::Eof) {
-            if matches!(self.current(), TokenKind::Semi) {
-                self.advance();
-                continue;
-            }
             let stmt = self.parse_statement()?;
             body.push(stmt);
         }
