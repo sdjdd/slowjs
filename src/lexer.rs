@@ -20,7 +20,9 @@ pub enum TokenKind {
     Star,  // *
     Slash, // /
 
-    Semi, // ;
+    Semi,   // ;
+    LBrace, // {
+    RBrace, // }
 
     Eof,
     Invalid,
@@ -87,14 +89,18 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         return parse_identifier(input).map_err(|_| LexerError::InvalidToken(input.to_string()));
     }
 
-    match input.chars().next().unwrap() {
-        '+' => Ok((input[1..].trim_start(), TokenKind::Plus)),
-        '-' => Ok((input[1..].trim_start(), TokenKind::Minus)),
-        '*' => Ok((input[1..].trim_start(), TokenKind::Star)),
-        '/' => Ok((input[1..].trim_start(), TokenKind::Slash)),
-        ';' => Ok((input[1..].trim_start(), TokenKind::Semi)),
-        c => Err(LexerError::InvalidToken(c.to_string())),
-    }
+    let (input, kind) = match input.chars().next().unwrap() {
+        '+' => (input[1..].trim_start(), TokenKind::Plus),
+        '-' => (input[1..].trim_start(), TokenKind::Minus),
+        '*' => (input[1..].trim_start(), TokenKind::Star),
+        '/' => (input[1..].trim_start(), TokenKind::Slash),
+        ';' => (input[1..].trim_start(), TokenKind::Semi),
+        '{' => (input[1..].trim_start(), TokenKind::LBrace),
+        '}' => (input[1..].trim_start(), TokenKind::RBrace),
+        c => return Err(LexerError::InvalidToken(c.to_string())),
+    };
+
+    Ok((input, kind))
 }
 
 fn parse_number(input: &str) -> IResult<&str, TokenKind> {

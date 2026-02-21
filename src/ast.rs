@@ -4,6 +4,7 @@ pub struct Program {
 
 pub enum Statement {
     ExpressionStatement { expression: Expression },
+    BlockStatement { body: Vec<Statement> },
 }
 
 pub enum Expression {

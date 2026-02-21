@@ -72,7 +72,18 @@ fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, 
         Statement::ExpressionStatement { expression } => {
             Ok(Some(eval_expression(&expression, ctx)?))
         }
+        Statement::BlockStatement { body } => eval_block(body, ctx),
     }
+}
+
+fn eval_block(statements: &[Statement], ctx: &mut Context) -> Result<Option<Value>, EvalError> {
+    let mut last_value = None;
+    for stmt in statements {
+        if let Some(value) = eval_statement(stmt, ctx)? {
+            last_value = Some(value);
+        }
+    }
+    Ok(last_value)
 }
 
 fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalError> {
