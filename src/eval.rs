@@ -69,14 +69,20 @@ pub fn eval_program(program: &Program, ctx: &mut Context) -> Result<Option<Value
 
 fn eval_statement(stmt: &Statement, ctx: &mut Context) -> Result<Option<Value>, EvalError> {
     match stmt {
-        Statement::Expression(expr) => Ok(Some(eval_expression(expr, ctx)?)),
+        Statement::ExpressionStatement { expression } => {
+            Ok(Some(eval_expression(&expression, ctx)?))
+        }
     }
 }
 
 fn eval_expression(expr: &Expression, ctx: &mut Context) -> Result<Value, EvalError> {
     match expr {
         Expression::Literal(literal) => eval_literal(literal, ctx),
-        Expression::Binary(left, op, right) => eval_binary(left, op, right, ctx),
+        Expression::BinaryExpression {
+            operator,
+            left,
+            right,
+        } => eval_binary(left, operator, right, ctx),
     }
 }
 

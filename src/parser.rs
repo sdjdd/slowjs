@@ -94,7 +94,7 @@ impl Parser {
             self.advance()?;
         }
 
-        Ok(Statement::Expression(expr))
+        Ok(Statement::ExpressionStatement { expression: expr })
     }
 
     pub fn parse_expression(&mut self) -> Result<Expression, ParseError> {
@@ -129,7 +129,11 @@ impl Parser {
 
             let right = self.parse_infix_expr(prec + 1)?;
 
-            left = Expression::Binary(Box::new(left), op, Box::new(right));
+            left = Expression::BinaryExpression {
+                operator: op,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
         }
 
         Ok(left)

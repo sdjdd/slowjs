@@ -1,3 +1,20 @@
+pub struct Program {
+    pub body: Vec<Statement>,
+}
+
+pub enum Statement {
+    ExpressionStatement { expression: Expression },
+}
+
+pub enum Expression {
+    Literal(Literal),
+    BinaryExpression {
+        operator: BinaryOperator,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
+}
+
 #[derive(Debug)]
 pub enum Literal {
     Null,
@@ -11,18 +28,4 @@ pub enum BinaryOperator {
     Subtract, // -
     Multiply, // *
     Divide,   // /
-}
-
-pub enum Expression {
-    Literal(Literal),
-    // TODO: Replace Box with Rc?
-    Binary(Box<Expression>, BinaryOperator, Box<Expression>),
-}
-
-pub enum Statement {
-    Expression(Expression),
-}
-
-pub struct Program {
-    pub body: Vec<Statement>,
 }
