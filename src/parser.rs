@@ -103,8 +103,17 @@ impl Parser {
         self.expect(TokenKind::Var)?;
 
         let mut declarations = Vec::new();
-        while !matches!(self.current(), TokenKind::Semi) {
+
+        loop {
             declarations.push(self.parse_variable_declration()?);
+
+            match self.current() {
+                TokenKind::Comma => {
+                    self.advance();
+                    continue;
+                }
+                _ => break,
+            }
         }
 
         self.expect(TokenKind::Semi)?;
@@ -141,9 +150,12 @@ impl Parser {
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
-        let expression = self.parse_expression()?;
+        if matches!(self.current(), TokenKind::LBrace) {
+            return Err(self.unexpected());
+        }
+
         Ok(Statement::ExpressionStatement(ExpressionStatement {
-            expression,
+            expression: self.parse_expression()?,
         }))
     }
 
@@ -212,11 +224,16 @@ impl Parser {
                 Ok(Expression::Identifier(Identifier { name }))
             }
             TokenKind::LBrace => self.parse_object_expression(),
-            _ => Err(ParseError::UnexpectedToken {
-                expected: None,
-                found: self.current().clone(),
-            }),
+            TokenKind::LParen => self.parse_paren_expression(),
+            _ => Err(self.unexpected()),
         }
+    }
+
+    fn parse_paren_expression(&mut self) -> Result<Expression, ParseError> {
+        self.expect(TokenKind::LParen)?;
+        let expr = self.parse_expression()?;
+        self.expect(TokenKind::RParen)?;
+        Ok(expr)
     }
 
     fn parse_object_expression(&mut self) -> Result<Expression, ParseError> {
@@ -274,10 +291,7 @@ impl Parser {
                 PropertyKey::Literal(Literal::Number(n))
             }
             _ => {
-                return Err(ParseError::UnexpectedToken {
-                    expected: None,
-                    found: self.current().clone(),
-                });
+                return Err(self.unexpected());
             }
         };
 

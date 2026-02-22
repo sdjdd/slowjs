@@ -1,9 +1,9 @@
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::{escaped, is_not, take_while, take_while1},
+    bytes::complete::{escaped, is_not, tag, take_while, take_while1},
     character::complete::{anychar, char, one_of},
-    combinator::{map, opt, recognize},
+    combinator::{map, opt, recognize, value},
     sequence::{delimited, pair},
 };
 use thiserror::Error;
@@ -30,9 +30,12 @@ pub enum TokenKind {
     Semi,   // ;
     LBrace, // {
     RBrace, // }
+    LParen, // (
+    RParen, // )
     Colon,  // :
     Comma,  // ,
     Assign, // =
+    LineTerminator,
 
     Eof,
 }
@@ -53,21 +56,29 @@ pub struct LexerError(String);
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexerError> {
     let mut tokens = Vec::new();
-    let mut remaining = input.trim_start();
+    let mut remaining = skip_whitespace(input);
 
     while !remaining.is_empty() {
         let (rest, kind) = parse_token(remaining)?;
         tokens.push(Token::new(kind));
-        remaining = rest.trim_start();
+        remaining = skip_whitespace(rest);
     }
 
     tokens.push(Token::new(TokenKind::Eof));
     Ok(tokens)
 }
 
+fn skip_whitespace(input: &str) -> &str {
+    input.trim_start_matches(|c: char| c.is_whitespace() && c != '\n' && c != '\r')
+}
+
 fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     if input.is_empty() {
         return Ok((input, TokenKind::Eof));
+    }
+
+    if let Ok((rest, tk)) = line_terminator(input) {
+        return Ok((rest, tk));
     }
 
     if input.chars().next().unwrap().is_ascii_digit() {
@@ -93,6 +104,8 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
         ';' => (&input[1..], TokenKind::Semi),
         '{' => (&input[1..], TokenKind::LBrace),
         '}' => (&input[1..], TokenKind::RBrace),
+        '(' => (&input[1..], TokenKind::LParen),
+        ')' => (&input[1..], TokenKind::RParen),
         ':' => (&input[1..], TokenKind::Colon),
         ',' => (&input[1..], TokenKind::Comma),
         '=' => (&input[1..], TokenKind::Assign),
@@ -100,6 +113,13 @@ fn parse_token(input: &str) -> Result<(&str, TokenKind), LexerError> {
     };
 
     Ok((input, kind))
+}
+
+fn line_terminator(input: &str) -> IResult<&str, TokenKind> {
+    let crlf = tag("\r\n");
+    let lf = tag("\n");
+    let cr = tag("\r");
+    value(TokenKind::LineTerminator, alt((crlf, lf, cr)))(input)
 }
 
 fn parse_number(input: &str) -> IResult<&str, TokenKind> {
