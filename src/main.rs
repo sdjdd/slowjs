@@ -1,4 +1,4 @@
-use slowjs::repl;
+mod repl;
 
 fn main() {
     repl::run();

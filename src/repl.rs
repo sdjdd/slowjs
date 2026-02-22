@@ -1,7 +1,8 @@
-use crate::eval::{Context, Value, eval_program};
-use crate::lexer::{TokenKind, tokenize};
-use crate::parser::{ParseError, parse};
 use rustyline::{DefaultEditor, error::ReadlineError};
+use slowjs::compiler::Compiler;
+use slowjs::lexer::{TokenKind, tokenize};
+use slowjs::parser::{ParseError, parse};
+use slowjs::vm::{JsValue, Vm};
 
 enum ReplError {
     ImcompleteInput,
@@ -12,10 +13,9 @@ pub fn run() {
     println!("Welcome to SlowJS.");
     println!("Press Ctrl-D to exit.");
 
-    let mut context = Context::new();
-
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
-
+    let mut vm = Vm::new();
+    let mut compiler = Compiler::new();
     let mut input_buffer = String::new();
 
     loop {
@@ -37,7 +37,7 @@ pub fn run() {
 
                 input_buffer.push_str(input);
 
-                match process_input(&input_buffer, &mut context) {
+                match process_input(&input_buffer, &mut compiler, &mut vm) {
                     Ok(value) => println!("{value}"),
                     Err(ReplError::ImcompleteInput) => {
                         continue;
@@ -64,7 +64,7 @@ pub fn run() {
     }
 }
 
-fn process_input(input: &str, context: &mut Context) -> Result<Value, ReplError> {
+fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<JsValue, ReplError> {
     let tokens = tokenize(input).map_err(|e| ReplError::Other(e.to_string()))?;
 
     let program = parse(tokens).map_err(|e| match e {
@@ -75,7 +75,13 @@ fn process_input(input: &str, context: &mut Context) -> Result<Value, ReplError>
         e => ReplError::Other(e.to_string()),
     })?;
 
-    let result = eval_program(&program, context).map_err(|e| ReplError::Other(e.to_string()))?;
+    let result = compiler.compile(&program);
 
-    Ok(result)
+    vm.clear_stack();
+    vm.set_constants(result.constants);
+    vm.run(&result.bytecode);
+
+    vm.value()
+        .map(|v| v.clone())
+        .ok_or_else(|| ReplError::Other("No result".to_string()))
 }
