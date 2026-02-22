@@ -7,6 +7,7 @@ pub enum Statement {
     BlockStatement(BlockStatement),
     EmptyStatement,
     Declaration(Declaration),
+    IfStatement(IfStatement),
 }
 
 pub struct ExpressionStatement {
@@ -97,4 +98,10 @@ pub enum BinaryOperator {
 
 pub struct Identifier {
     pub name: String,
+}
+
+pub struct IfStatement {
+    pub test: Box<Expression>,
+    pub consequent: Box<Statement>,
+    pub alternate: Option<Box<Statement>>,
 }

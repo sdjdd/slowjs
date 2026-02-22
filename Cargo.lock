@@ -196,7 +196,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "slowjs_impl"
+name = "slowjs"
 version = "0.1.0"
 dependencies = [
  "nom",

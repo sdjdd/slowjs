@@ -20,6 +20,8 @@ pub enum TokenKind {
     Var,
     Let,
     Const,
+    If,
+    Else,
 
     // Operators
     Plus,  // +
@@ -163,6 +165,8 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
         "var" => TokenKind::Var,
         "let" => TokenKind::Let,
         "const" => TokenKind::Const,
+        "if" => TokenKind::If,
+        "else" => TokenKind::Else,
         _ => TokenKind::Ident(ident.to_string()),
     })(input)
 }

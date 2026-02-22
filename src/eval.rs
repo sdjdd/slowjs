@@ -1,7 +1,7 @@
 use crate::ast::{
     BinaryExpression, BinaryOperator, BlockStatement, Declaration, Expression, ExpressionStatement,
-    Identifier, Literal, ObjectExpression, Program, PropertyKey, PropertyKind, Statement,
-    VariableDeclaration,
+    Identifier, IfStatement, Literal, ObjectExpression, Program, PropertyKey, PropertyKind,
+    Statement, VariableDeclaration,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -20,6 +20,23 @@ pub enum Value {
     Number(f64),
     String(String),
     Object(HashMap<String, Value>),
+}
+
+impl Value {
+    pub fn to_boolean(&self) -> Value {
+        if let Value::Boolean(_) = self {
+            return self.clone();
+        }
+        if let Value::Null | Value::Undefined = self {
+            return Value::Boolean(false);
+        }
+        if let Value::Number(n) = self {
+            if *n == 0.0 || n.is_nan() {
+                return Value::Boolean(false);
+            }
+        }
+        Value::Boolean(true)
+    }
 }
 
 impl std::fmt::Display for Value {
@@ -135,6 +152,7 @@ fn eval_statement(stmt: &Statement, env: &Rc<RefCell<Environment>>) -> Result<Va
         Statement::Declaration(Declaration::VariableDeclaration(decl)) => {
             eval_variable_declaration(decl, env)
         }
+        Statement::IfStatement(stmt) => stmt.eval(env),
     }
 }
 
@@ -241,6 +259,23 @@ impl Eval for Literal {
             Literal::Boolean(b) => Ok(Value::Boolean(*b)),
             Literal::Number(n) => Ok(Value::Number(*n)),
             Literal::String(s) => Ok(Value::String(s.clone())),
+        }
+    }
+}
+
+impl Eval for IfStatement {
+    fn eval(&self, env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError> {
+        match eval_expression(&self.test, env)? {
+            Value::Boolean(b) => {
+                if b {
+                    eval_statement(&self.consequent, env)
+                } else if let Some(alternate) = &self.alternate {
+                    eval_statement(alternate, env)
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
+            _ => unreachable!(),
         }
     }
 }

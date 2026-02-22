@@ -1,8 +1,8 @@
 use crate::{
     ast::{
         BinaryOperator, BlockStatement, Declaration, Expression, ExpressionStatement, Identifier,
-        Literal, ObjectExpression, Program, Property, PropertyKey, PropertyKind, Statement,
-        VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
+        IfStatement, Literal, ObjectExpression, Program, Property, PropertyKey, PropertyKind,
+        Statement, VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
     },
     lexer::{LexerError, Token, TokenKind},
 };
@@ -81,6 +81,7 @@ impl Parser {
                 self.advance();
                 Ok(Statement::EmptyStatement)
             }
+            TokenKind::If => Ok(Statement::IfStatement(self.parse_if_statement()?)),
             _ => self.parse_expression_statement(),
         }
     }
@@ -303,6 +304,25 @@ impl Parser {
             key,
             value,
             kind: PropertyKind::Init,
+        })
+    }
+
+    fn parse_if_statement(&mut self) -> Result<IfStatement, ParseError> {
+        self.expect(TokenKind::If)?;
+        self.expect(TokenKind::LParen)?;
+        let test = self.parse_expression()?;
+        self.expect(TokenKind::RParen)?;
+        let consequent = self.parse_statement()?;
+        let alternate = if matches!(self.current(), TokenKind::Else) {
+            self.advance();
+            Some(self.parse_statement()?)
+        } else {
+            None
+        };
+        Ok(IfStatement {
+            test: Box::new(test),
+            consequent: Box::new(consequent),
+            alternate: alternate.map(Box::new),
         })
     }
 }
