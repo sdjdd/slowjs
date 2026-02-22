@@ -9,16 +9,6 @@ pub enum Statement {
     Declaration(Declaration),
 }
 
-impl Statement {
-    pub fn new_expression(expression: Expression) -> Self {
-        Statement::ExpressionStatement(ExpressionStatement { expression })
-    }
-
-    pub fn new_block(body: Vec<Statement>) -> Self {
-        Statement::BlockStatement(BlockStatement { body })
-    }
-}
-
 pub struct ExpressionStatement {
     pub expression: Expression,
 }
