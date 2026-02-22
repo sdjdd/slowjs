@@ -8,6 +8,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use thiserror::Error;
 
+pub trait Eval {
+    fn eval(&self, env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError>;
+}
+
 #[derive(Clone)]
 pub enum Value {
     Null,
@@ -161,7 +165,7 @@ fn eval_variable_declaration(
 
 fn eval_expression(expr: &Expression, env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError> {
     match expr {
-        Expression::Literal(literal) => eval_literal(literal),
+        Expression::Literal(literal) => literal.eval(env),
         Expression::Identifier(Identifier { name }) => eval_identifier(name, env),
         Expression::BinaryExpression(BinaryExpression {
             operator,
@@ -230,11 +234,13 @@ fn eval_binary(
     }
 }
 
-fn eval_literal(literal: &Literal) -> Result<Value, EvalError> {
-    match literal {
-        Literal::Null => Ok(Value::Null),
-        Literal::Boolean(b) => Ok(Value::Boolean(*b)),
-        Literal::Number(n) => Ok(Value::Number(*n)),
-        Literal::String(s) => Ok(Value::String(s.clone())),
+impl Eval for Literal {
+    fn eval(&self, _env: &Rc<RefCell<Environment>>) -> Result<Value, EvalError> {
+        match self {
+            Literal::Null => Ok(Value::Null),
+            Literal::Boolean(b) => Ok(Value::Boolean(*b)),
+            Literal::Number(n) => Ok(Value::Number(*n)),
+            Literal::String(s) => Ok(Value::String(s.clone())),
+        }
     }
 }
