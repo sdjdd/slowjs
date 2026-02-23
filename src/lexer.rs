@@ -22,6 +22,8 @@ pub enum TokenKind {
     Const,
     If,
     Else,
+    Function,
+    Return,
 
     // Operators
     Plus,  // +
@@ -167,6 +169,8 @@ fn parse_identifier(input: &str) -> IResult<&str, TokenKind> {
         "const" => TokenKind::Const,
         "if" => TokenKind::If,
         "else" => TokenKind::Else,
+        "function" => TokenKind::Function,
+        "return" => TokenKind::Return,
         _ => TokenKind::Ident(ident.to_string()),
     })(input)
 }

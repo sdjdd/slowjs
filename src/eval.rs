@@ -153,6 +153,7 @@ fn eval_statement(stmt: &Statement, env: &Rc<RefCell<Environment>>) -> Result<Va
             eval_variable_declaration(decl, env)
         }
         Statement::IfStatement(stmt) => stmt.eval(env),
+        _ => unimplemented!(),
     }
 }
 
@@ -191,6 +192,7 @@ fn eval_expression(expr: &Expression, env: &Rc<RefCell<Environment>>) -> Result<
             right,
         }) => eval_binary(left, operator, right, env),
         Expression::ObjectExpression(obj) => eval_object_expression(obj, env),
+        _ => unimplemented!(),
     }
 }
 

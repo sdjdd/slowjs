@@ -1,7 +1,8 @@
 use crate::{
     ast::{
-        BinaryOperator, BlockStatement, Declaration, Expression, ExpressionStatement, Identifier,
-        IfStatement, Literal, ObjectExpression, Program, Property, PropertyKey, PropertyKind,
+        self, BinaryOperator, BlockStatement, CallExpression, Declaration, Expression,
+        ExpressionStatement, FunctionDeclaration, Identifier, IfStatement, Literal,
+        ObjectExpression, Pattern, Program, Property, PropertyKey, PropertyKind, ReturnStatement,
         Statement, VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
     },
     lexer::{LexerError, Token, TokenKind},
@@ -82,6 +83,10 @@ impl Parser {
                 Ok(Statement::EmptyStatement)
             }
             TokenKind::If => Ok(Statement::IfStatement(self.parse_if_statement()?)),
+            TokenKind::Function => Ok(Statement::Declaration(Declaration::FunctionDeclaration(
+                self.parse_function_declaration()?,
+            ))),
+            TokenKind::Return => Ok(Statement::ReturnStatement(self.parse_return_statement()?)),
             _ => self.parse_expression_statement(),
         }
     }
@@ -164,7 +169,61 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_additive_expression()
+        self.parse_call_expression()
+    }
+
+    fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_additive_expression()?;
+
+        // handle chained call
+        loop {
+            if matches!(self.current(), TokenKind::LParen) {
+                expr = self.parse_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_call(&mut self, callee: Expression) -> Result<Expression, ParseError> {
+        self.expect(TokenKind::LParen)?;
+
+        let args = self.parse_arguments()?;
+
+        self.expect(TokenKind::RParen)?;
+
+        Ok(Expression::CallExpression(CallExpression {
+            callee: Box::new(callee),
+            arguments: args,
+        }))
+    }
+
+    fn parse_arguments(&mut self) -> Result<Vec<Expression>, ParseError> {
+        let mut args = Vec::new();
+
+        // No arguments
+        if matches!(self.current(), TokenKind::RParen) {
+            return Ok(args);
+        }
+
+        loop {
+            args.push(self.parse_expression()?);
+
+            if matches!(self.current(), TokenKind::RParen) {
+                break;
+            }
+
+            self.expect(TokenKind::Comma)?;
+
+            // Trailing comma
+            if matches!(self.current(), TokenKind::RParen) {
+                break;
+            }
+        }
+
+        Ok(args)
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression, ParseError> {
@@ -227,6 +286,7 @@ impl Parser {
                 self.advance();
                 Ok(Expression::Identifier(Identifier { name }))
             }
+            TokenKind::Function => self.parse_function_expression(),
             TokenKind::LBrace => self.parse_object_expression(),
             TokenKind::LParen => self.parse_paren_expression(),
             _ => Err(self.unexpected()),
@@ -326,6 +386,124 @@ impl Parser {
             test: Box::new(test),
             consequent: Box::new(consequent),
             alternate: alternate.map(Box::new),
+        })
+    }
+
+    fn parse_function_declaration(&mut self) -> Result<FunctionDeclaration, ParseError> {
+        self.expect(TokenKind::Function)?;
+
+        let name = match self.current() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                name
+            }
+            _ => return Err(self.unexpected()),
+        };
+
+        self.expect(TokenKind::LParen)?;
+        let params = self.parse_params()?;
+        self.expect(TokenKind::RParen)?;
+
+        self.expect(TokenKind::LBrace)?;
+        let body = self.parse_function_body()?;
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(FunctionDeclaration {
+            id: Identifier { name },
+            params,
+            body,
+        })
+    }
+
+    fn parse_function_expression(&mut self) -> Result<Expression, ParseError> {
+        self.expect(TokenKind::Function)?;
+
+        let name = if matches!(self.current(), TokenKind::Ident(_)) {
+            let name = match self.current() {
+                TokenKind::Ident(n) => n.clone(),
+                _ => unreachable!(),
+            };
+            self.advance();
+            Some(Identifier { name })
+        } else {
+            None
+        };
+
+        self.expect(TokenKind::LParen)?;
+        let params = self.parse_params()?;
+        self.expect(TokenKind::RParen)?;
+
+        self.expect(TokenKind::LBrace)?;
+        let body = self.parse_function_body()?;
+        self.expect(TokenKind::RBrace)?;
+
+        Ok(Expression::FunctionExpression(ast::FunctionExpression {
+            id: name,
+            params,
+            body,
+        }))
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<Pattern>, ParseError> {
+        let mut params = Vec::new();
+
+        // Handle empty params
+        if matches!(self.current(), TokenKind::RParen) {
+            return Ok(params);
+        }
+
+        loop {
+            match self.current() {
+                TokenKind::Ident(name) => {
+                    let name = name.clone();
+                    self.advance();
+                    params.push(Pattern::Identifier(Identifier { name }));
+                }
+                _ => return Err(self.unexpected()),
+            }
+
+            if matches!(self.current(), TokenKind::RParen) {
+                break;
+            }
+
+            self.expect(TokenKind::Comma)?;
+
+            // Handle trailing comma
+            if matches!(self.current(), TokenKind::RParen) {
+                break;
+            }
+        }
+
+        Ok(params)
+    }
+
+    fn parse_function_body(&mut self) -> Result<BlockStatement, ParseError> {
+        let mut body = Vec::new();
+
+        while !matches!(self.current(), TokenKind::RBrace) {
+            let stmt = self.parse_statement()?;
+            body.push(stmt);
+        }
+
+        Ok(BlockStatement { body })
+    }
+
+    fn parse_return_statement(&mut self) -> Result<ReturnStatement, ParseError> {
+        self.expect(TokenKind::Return)?;
+
+        if matches!(
+            self.current(),
+            TokenKind::Semi | TokenKind::RBrace | TokenKind::LineTerminator
+        ) {
+            return Ok(ReturnStatement { argument: None });
+        }
+
+        let argument = self.parse_expression()?;
+        self.expect(TokenKind::Semi)?;
+
+        Ok(ReturnStatement {
+            argument: Some(argument),
         })
     }
 }

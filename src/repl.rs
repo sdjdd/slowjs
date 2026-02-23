@@ -75,12 +75,8 @@ fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<Js
         e => ReplError::Other(e.to_string()),
     })?;
 
-    println!("{:#?}", program.body);
-
     let result = compiler.compile(&program).unwrap();
 
-    vm.clear_stack();
-    vm.set_constants(result.constants);
     vm.run(&result.bytecode)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 

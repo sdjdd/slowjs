@@ -9,6 +9,7 @@ pub enum Statement {
     EmptyStatement,
     Declaration(Declaration),
     IfStatement(IfStatement),
+    ReturnStatement(ReturnStatement),
 }
 
 #[derive(Debug)]
@@ -19,6 +20,7 @@ pub struct ExpressionStatement {
 #[derive(Debug)]
 pub enum Declaration {
     VariableDeclaration(VariableDeclaration),
+    FunctionDeclaration(FunctionDeclaration),
 }
 
 #[derive(Debug)]
@@ -49,6 +51,8 @@ pub enum Expression {
     Identifier(Identifier),
     BinaryExpression(BinaryExpression),
     ObjectExpression(ObjectExpression),
+    FunctionExpression(FunctionExpression),
+    CallExpression(CallExpression),
 }
 
 impl Expression {
@@ -119,4 +123,36 @@ pub struct IfStatement {
     pub test: Box<Expression>,
     pub consequent: Box<Statement>,
     pub alternate: Option<Box<Statement>>,
+}
+
+#[derive(Debug)]
+pub struct FunctionDeclaration {
+    pub id: Identifier,
+    pub params: Vec<Pattern>,
+    pub body: BlockStatement,
+}
+
+#[derive(Debug)]
+pub struct FunctionExpression {
+    pub id: Option<Identifier>,
+    pub params: Vec<Pattern>,
+    pub body: BlockStatement,
+}
+
+#[derive(Debug)]
+pub enum Pattern {
+    Identifier(Identifier),
+}
+
+pub type FunctionBody = BlockStatement;
+
+#[derive(Debug)]
+pub struct ReturnStatement {
+    pub argument: Option<Expression>,
+}
+
+#[derive(Debug)]
+pub struct CallExpression {
+    pub callee: Box<Expression>,
+    pub arguments: Vec<Expression>,
 }
