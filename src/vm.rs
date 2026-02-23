@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+
+use thiserror::Error;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsValue {
     Null,
@@ -35,18 +40,54 @@ impl std::fmt::Display for JsValue {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum RuntimeError {
+    #[error("{0} is not defined")]
+    ReferenceError(String),
+    #[error("Identifier '{0}' has already been declared")]
+    SyntaxError(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum OpCode {
+    PushNull,
+    PushUndefined,
+    PushTrue,
+    PushFalse,
     PushConst(usize),
+
     Add,
     Sub,
 
     Halt,
+
+    SlowPushValue(JsValue),
+    SlowDeclareVar,
+    SlowLoadVar,
+    SlowPushVar,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+pub enum VmConstant {
+    String(String),
+}
+
+struct Environment {
+    bindings: HashMap<String, JsValue>,
+}
+
+impl Environment {
+    fn new() -> Self {
+        Self {
+            bindings: HashMap::new(),
+        }
+    }
 }
 
 pub struct Vm {
     pub(crate) stack: Vec<JsValue>,
-    pub(crate) constants: Vec<JsValue>,
+    pub(crate) constants: Vec<VmConstant>,
+    env: Environment,
 }
 
 impl Vm {
@@ -54,10 +95,11 @@ impl Vm {
         Self {
             stack: Vec::new(),
             constants: Vec::new(),
+            env: Environment::new(),
         }
     }
 
-    pub fn set_constants(&mut self, constants: Vec<JsValue>) {
+    pub fn set_constants(&mut self, constants: Vec<VmConstant>) {
         self.constants = constants;
     }
 
@@ -65,12 +107,26 @@ impl Vm {
         self.stack.clear();
     }
 
-    pub fn run(&mut self, bytecode: &[OpCode]) {
+    pub fn run(&mut self, bytecode: &[OpCode]) -> Result<(), RuntimeError> {
         for op in bytecode {
             match op {
-                OpCode::PushConst(idx) => {
-                    self.stack.push(self.constants[*idx].clone());
+                OpCode::PushNull => {
+                    self.stack.push(JsValue::Null);
                 }
+                OpCode::PushUndefined => {
+                    self.stack.push(JsValue::Undefined);
+                }
+                OpCode::PushTrue => {
+                    self.stack.push(JsValue::Boolean(true));
+                }
+                OpCode::PushFalse => {
+                    self.stack.push(JsValue::Boolean(false));
+                }
+                OpCode::PushConst(idx) => match &self.constants[*idx] {
+                    VmConstant::String(s) => {
+                        self.stack.push(JsValue::String(s.clone()));
+                    }
+                },
                 OpCode::Add => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
@@ -97,8 +153,46 @@ impl Vm {
                 OpCode::Halt => {
                     break;
                 }
+
+                OpCode::SlowPushValue(val) => self.stack.push(val.clone()),
+                OpCode::SlowDeclareVar => {
+                    let name = self.stack.pop().unwrap();
+                    match name {
+                        JsValue::String(name) => {
+                            self.env.bindings.insert(name.clone(), JsValue::Undefined)
+                        }
+                        _ => panic!("Invalid variable name"),
+                    };
+                }
+                OpCode::SlowPushVar => {
+                    let name = self.stack.pop().unwrap();
+                    match name {
+                        JsValue::String(name) => self
+                            .env
+                            .bindings
+                            .get(&name)
+                            .map(|v| self.stack.push(v.clone()))
+                            .ok_or_else(|| RuntimeError::ReferenceError(name))
+                            .map(|_| ())?,
+                        _ => panic!("Invalid variable name"),
+                    }
+                }
+                OpCode::SlowLoadVar => {
+                    let name = self.stack.pop().unwrap();
+                    match name {
+                        JsValue::String(name) => match self.env.bindings.entry(name.clone()) {
+                            Entry::Occupied(mut entry) => {
+                                entry.insert(self.stack.pop().unwrap());
+                            }
+                            Entry::Vacant(_) => return Err(RuntimeError::SyntaxError(name)),
+                        },
+                        _ => panic!("Invalid variable name"),
+                    }
+                }
             }
         }
+
+        Ok(())
     }
 
     pub fn value(&mut self) -> Option<&JsValue> {

@@ -2,6 +2,7 @@ pub struct Program {
     pub body: Vec<Statement>,
 }
 
+#[derive(Debug)]
 pub enum Statement {
     ExpressionStatement(ExpressionStatement),
     BlockStatement(BlockStatement),
@@ -10,32 +11,39 @@ pub enum Statement {
     IfStatement(IfStatement),
 }
 
+#[derive(Debug)]
 pub struct ExpressionStatement {
     pub expression: Expression,
 }
 
+#[derive(Debug)]
 pub enum Declaration {
     VariableDeclaration(VariableDeclaration),
 }
 
+#[derive(Debug)]
 pub struct VariableDeclaration {
     pub declarations: Vec<VariableDeclarator>,
     pub kind: VariableDeclarationKind,
 }
 
+#[derive(Debug)]
 pub struct VariableDeclarator {
     pub id: Identifier,
     pub init: Option<Expression>,
 }
 
+#[derive(Debug)]
 pub enum VariableDeclarationKind {
     Var,
 }
 
+#[derive(Debug)]
 pub struct BlockStatement {
     pub body: Vec<Statement>,
 }
 
+#[derive(Debug)]
 pub enum Expression {
     Literal(Literal),
     Identifier(Identifier),
@@ -53,28 +61,32 @@ impl Expression {
     }
 }
 
+#[derive(Debug)]
 pub struct ObjectExpression {
     pub properties: Vec<Property>,
 }
 
+#[derive(Debug)]
 pub struct Property {
     pub key: PropertyKey,
     pub value: Expression,
     pub kind: PropertyKind,
 }
 
+#[derive(Debug)]
 pub enum PropertyKey {
     Literal(Literal),
     Identifier(Identifier),
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PropertyKind {
     Init,
     Get,
     Set,
 }
 
+#[derive(Debug)]
 pub struct BinaryExpression {
     pub operator: BinaryOperator,
     pub left: Box<Expression>,
@@ -89,6 +101,7 @@ pub enum Literal {
     String(String),
 }
 
+#[derive(Debug)]
 pub enum BinaryOperator {
     Add,      // +
     Subtract, // -
@@ -96,10 +109,12 @@ pub enum BinaryOperator {
     Divide,   // /
 }
 
+#[derive(Debug)]
 pub struct Identifier {
     pub name: String,
 }
 
+#[derive(Debug)]
 pub struct IfStatement {
     pub test: Box<Expression>,
     pub consequent: Box<Statement>,

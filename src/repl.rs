@@ -75,13 +75,14 @@ fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<Js
         e => ReplError::Other(e.to_string()),
     })?;
 
-    let result = compiler.compile(&program);
+    println!("{:#?}", program.body);
+
+    let result = compiler.compile(&program).unwrap();
 
     vm.clear_stack();
     vm.set_constants(result.constants);
-    vm.run(&result.bytecode);
+    vm.run(&result.bytecode)
+        .map_err(|e| ReplError::Other(e.to_string()))?;
 
-    vm.value()
-        .map(|v| v.clone())
-        .ok_or_else(|| ReplError::Other("No result".to_string()))
+    Ok(vm.value().map(|v| v.clone()).unwrap_or(JsValue::Undefined))
 }

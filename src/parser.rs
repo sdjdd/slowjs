@@ -155,8 +155,11 @@ impl Parser {
             return Err(self.unexpected());
         }
 
+        let expression = self.parse_expression()?;
+        self.expect(TokenKind::Semi)?;
+
         Ok(Statement::ExpressionStatement(ExpressionStatement {
-            expression: self.parse_expression()?,
+            expression,
         }))
     }
 
