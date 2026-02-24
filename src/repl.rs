@@ -77,7 +77,7 @@ fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<Js
 
     let result = compiler.compile(&program).unwrap();
 
-    vm.run(&result.bytecode)
+    vm.run(&result.bytecode, &result.constants)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 
     Ok(vm.value().map(|v| v.clone()).unwrap_or(JsValue::Undefined))

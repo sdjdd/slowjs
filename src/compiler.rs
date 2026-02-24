@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::vm::{JsFunction, JsValue, OpCode};
+use crate::vm::{ConstantPool, JsFunction, JsValue, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {
@@ -11,15 +12,80 @@ pub enum CompilerError {
     SyntaxError(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScopeKind {
+    Global,
+    Function,
+}
+
+#[derive(Debug)]
+struct Scope {
+    variables: HashMap<String, usize>,
+    slot_count: usize,
+    kind: ScopeKind,
+}
+
+impl Scope {
+    fn new(kind: ScopeKind) -> Self {
+        Self {
+            variables: HashMap::new(),
+            slot_count: 0,
+            kind,
+        }
+    }
+}
+
 pub struct Compiler {
     bytecode: Vec<OpCode>,
+    constants: ConstantPool,
+    scopes: Vec<Scope>,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         Self {
             bytecode: Vec::new(),
+            constants: Vec::new(),
+            scopes: Vec::new(),
         }
+    }
+
+    fn begin_scope(&mut self, kind: ScopeKind) {
+        self.scopes.push(Scope::new(kind));
+    }
+
+    fn end_scope(&mut self) -> usize {
+        self.scopes.pop().map(|s| s.slot_count).unwrap_or(0)
+    }
+
+    fn declare_variable(&mut self, name: String) -> usize {
+        let scope = self.scopes.last_mut().expect("No scope");
+        let slot = scope.slot_count;
+        scope.slot_count += 1;
+        scope.variables.insert(name, slot);
+        slot
+    }
+
+    fn add_constant(&mut self, value: JsValue) -> usize {
+        if matches!(value, JsValue::Function(_)) {
+            let index = self.constants.len();
+            self.constants.push(value);
+            return index;
+        }
+
+        for (i, existing) in self.constants.iter().enumerate() {
+            match (&value, existing) {
+                (JsValue::String(a), JsValue::String(b)) if a == b => return i,
+                (JsValue::Number(a), JsValue::Number(b)) if a == b => return i,
+                (JsValue::Boolean(a), JsValue::Boolean(b)) if a == b => return i,
+                (JsValue::Null, JsValue::Null) => return i,
+                (JsValue::Undefined, JsValue::Undefined) => return i,
+                _ => continue,
+            }
+        }
+        let index = self.constants.len();
+        self.constants.push(value);
+        index
     }
 
     fn emit(&mut self, op: OpCode) {
@@ -27,20 +93,27 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<CompileResult, CompilerError> {
+        self.begin_scope(ScopeKind::Global);
         self.compile_program(program)?;
+        self.end_scope();
         self.bytecode.push(OpCode::Halt);
 
         let result = CompileResult {
             bytecode: self.bytecode.clone(),
+            constants: self.constants.clone(),
         };
 
         self.bytecode.clear();
+        self.constants.clear();
         Ok(result)
     }
 
     fn compile_program(&mut self, program: &Program) -> Result<(), CompilerError> {
-        for stmt in &program.body {
-            self.compile_statement(stmt)?;
+        for item in &program.body {
+            match item {
+                StatementOrDirective::Statement(stmt) => self.compile_statement(stmt)?,
+                StatementOrDirective::Directive(_) => {}
+            }
         }
         Ok(())
     }
@@ -70,17 +143,40 @@ impl Compiler {
         decl: &VariableDeclaration,
     ) -> Result<(), CompilerError> {
         for VariableDeclarator { id, init } in &decl.declarations {
-            self.emit(OpCode::SlowPushValue(JsValue::String(id.name.to_string())));
-            self.emit(OpCode::SlowDeclareVar);
-            if let Some(init) = init {
-                if let Expression::FunctionExpression(func) = init {
-                    // Prepare a name for anonymous function
-                    self.compile_function_expression(func, Some(&id.name))?;
-                } else {
-                    self.compile_expression(init)?;
+            let var_name = match id {
+                Pattern::Identifier(ident) => &ident.name,
+            };
+
+            let scope_kind = self
+                .scopes
+                .last()
+                .map(|s| s.kind)
+                .unwrap_or(ScopeKind::Global);
+
+            match scope_kind {
+                ScopeKind::Global => {
+                    let name_index = self.add_constant(JsValue::String(var_name.to_string()));
+                    self.emit(OpCode::DeclareGlobal(name_index));
+                    if let Some(init) = init {
+                        if let Expression::FunctionExpression(func) = init {
+                            self.compile_function_expression(func, Some(var_name))?;
+                        } else {
+                            self.compile_expression(init)?;
+                        }
+                        self.emit(OpCode::SetGlobal(name_index));
+                    }
                 }
-                self.emit(OpCode::SlowPushValue(JsValue::String(id.name.to_string())));
-                self.emit(OpCode::SlowSetVar);
+                ScopeKind::Function => {
+                    let slot = self.declare_variable(var_name.clone());
+                    if let Some(init) = init {
+                        if let Expression::FunctionExpression(func) = init {
+                            self.compile_function_expression(func, Some(var_name))?;
+                        } else {
+                            self.compile_expression(init)?;
+                        }
+                        self.emit(OpCode::SetLocal(slot));
+                    }
+                }
             }
         }
 
@@ -100,24 +196,44 @@ impl Compiler {
     }
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
-        self.emit(OpCode::SlowPushValue(JsValue::String(id.name.to_string())));
-        self.emit(OpCode::SlowGetVar);
+        for (_depth, scope) in self.scopes.iter().enumerate().rev() {
+            if let Some(&slot) = scope.variables.get(&id.name) {
+                match scope.kind {
+                    ScopeKind::Global => {
+                        break;
+                    }
+                    ScopeKind::Function => {
+                        self.emit(OpCode::GetLocal(slot));
+                    }
+                }
+                return Ok(());
+            }
+        }
+
+        let index = self.add_constant(JsValue::String(id.name.to_string()));
+        self.emit(OpCode::GetGlobal(index));
         Ok(())
     }
 
     fn compile_literal(&mut self, literal: &Literal) -> Result<(), CompilerError> {
-        self.emit(match literal {
-            Literal::Null => OpCode::PushNull,
+        match literal {
+            Literal::Null => self.emit(OpCode::PushNull),
             Literal::Boolean(b) => {
                 if *b {
-                    OpCode::PushTrue
+                    self.emit(OpCode::PushTrue);
                 } else {
-                    OpCode::PushFalse
+                    self.emit(OpCode::PushFalse);
                 }
             }
-            Literal::Number(n) => OpCode::SlowPushValue(JsValue::Number(*n)),
-            Literal::String(s) => OpCode::SlowPushValue(JsValue::String(s.clone())),
-        });
+            Literal::Number(n) => {
+                let index = self.add_constant(JsValue::Number(*n));
+                self.emit(OpCode::PushConstant(index));
+            }
+            Literal::String(s) => {
+                let index = self.add_constant(JsValue::String(s.clone()));
+                self.emit(OpCode::PushConstant(index));
+            }
+        }
         Ok(())
     }
 
@@ -149,43 +265,28 @@ impl Compiler {
         &mut self,
         func: &FunctionDeclaration,
     ) -> Result<(), CompilerError> {
-        let mut func_compiler = Compiler::new();
-        for stmt in &func.body.body {
-            func_compiler.compile_statement(stmt)?;
-        }
-        if !matches!(func_compiler.bytecode.last(), Some(OpCode::Return)) {
-            func_compiler.emit(OpCode::PushUndefined);
-            func_compiler.emit(OpCode::Return);
-        }
-
-        let func_val = JsValue::Function(Rc::new(JsFunction {
-            name: func.id.name.clone(),
-            params: func
-                .params
-                .iter()
-                .map(|p| match p {
-                    Pattern::Identifier(id) => id.name.clone(),
-                })
-                .collect(),
-            bytecode: func_compiler.bytecode,
-        }));
-
-        self.emit(OpCode::SlowPushValue(JsValue::String(func.id.name.clone())));
-        self.emit(OpCode::SlowDeclareVar);
-
-        self.emit(OpCode::SlowPushValue(func_val));
-        self.emit(OpCode::SlowPushValue(JsValue::String(func.id.name.clone())));
-        self.emit(OpCode::SlowSetVar);
-
+        let name_index = self.add_constant(JsValue::String(func.id.name.clone()));
+        self.emit(OpCode::DeclareGlobal(name_index));
+        self.compile_function_expression(&((*func).clone().into()), None)?;
+        self.emit(OpCode::SetGlobal(name_index));
         Ok(())
     }
 
     fn compile_function_expression(
         &mut self,
         func: &FunctionExpression,
-        inferred_name: Option<&String>,
+        func_name: Option<&String>,
     ) -> Result<(), CompilerError> {
         let mut func_compiler = Compiler::new();
+        func_compiler.begin_scope(ScopeKind::Function);
+
+        for param in &func.params {
+            let param_name = match param {
+                Pattern::Identifier(id) => id.name.clone(),
+            };
+            func_compiler.declare_variable(param_name);
+        }
+
         for stmt in &func.body.body {
             func_compiler.compile_statement(stmt)?;
         }
@@ -194,11 +295,17 @@ impl Compiler {
             func_compiler.emit(OpCode::Return);
         }
 
+        let slot_count = func_compiler.end_scope();
+
+        let mut final_bytecode = Vec::new();
+        final_bytecode.push(OpCode::DeclareLocal(slot_count));
+        final_bytecode.extend(func_compiler.bytecode);
+
         let func_name = func
             .id
             .as_ref()
-            .map(|i| i.name.clone())
-            .or_else(|| inferred_name.cloned())
+            .map(|id| id.name.clone())
+            .or_else(|| func_name.cloned())
             .unwrap_or_default();
 
         let func_val = JsValue::Function(Rc::new(JsFunction {
@@ -210,10 +317,12 @@ impl Compiler {
                     Pattern::Identifier(id) => id.name.clone(),
                 })
                 .collect(),
-            bytecode: func_compiler.bytecode,
+            bytecode: final_bytecode,
+            constants: func_compiler.constants,
         }));
 
-        self.emit(OpCode::SlowPushValue(func_val));
+        let func_index = self.add_constant(func_val);
+        self.emit(OpCode::PushConstant(func_index));
         Ok(())
     }
 
@@ -241,4 +350,5 @@ impl Compiler {
 #[derive(Debug)]
 pub struct CompileResult {
     pub bytecode: Vec<OpCode>,
+    pub constants: ConstantPool,
 }

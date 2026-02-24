@@ -14,25 +14,34 @@ pub enum JsValue {
     Function(Rc<JsFunction>),
 }
 
+pub type ConstantPool = Vec<JsValue>;
+
 #[derive(Debug, Clone)]
 pub struct JsFunction {
     pub name: String,
     pub params: Vec<String>,
     pub bytecode: Vec<OpCode>,
+    pub constants: ConstantPool,
 }
 
 pub struct CallFrame {
     pub bytecode: Vec<OpCode>,
     pub ip: usize,
     pub env: Rc<RefCell<Environment>>,
+    pub constants: ConstantPool,
 }
 
 impl CallFrame {
-    pub fn new(bytecode: Vec<OpCode>, env: Rc<RefCell<Environment>>) -> Self {
+    pub fn new(
+        bytecode: Vec<OpCode>,
+        env: Rc<RefCell<Environment>>,
+        constants: ConstantPool,
+    ) -> Self {
         Self {
             bytecode,
             ip: 0,
             env,
+            constants,
         }
     }
 }
@@ -86,10 +95,13 @@ pub enum OpCode {
 
     Halt,
 
-    SlowPushValue(JsValue),
-    SlowDeclareVar,
-    SlowGetVar,
-    SlowSetVar,
+    PushConstant(usize),
+    DeclareLocal(usize),
+    GetLocal(usize),
+    SetLocal(usize),
+    DeclareGlobal(usize),
+    GetGlobal(usize),
+    SetGlobal(usize),
 
     /// Call a function with n arguments
     Call(usize),
@@ -98,6 +110,7 @@ pub enum OpCode {
 
 #[derive(Debug, Clone)]
 pub struct Environment {
+    slots: Vec<JsValue>,
     bindings: HashMap<String, JsValue>,
     parent: Option<Rc<RefCell<Environment>>>,
 }
@@ -105,6 +118,7 @@ pub struct Environment {
 impl Environment {
     pub fn new() -> Self {
         Self {
+            slots: Vec::new(),
             bindings: HashMap::new(),
             parent: None,
         }
@@ -112,19 +126,33 @@ impl Environment {
 
     pub fn with_parent(parent: Rc<RefCell<Environment>>) -> Self {
         Self {
+            slots: Vec::new(),
             bindings: HashMap::new(),
             parent: Some(parent),
         }
     }
 
-    pub fn get(&self, name: &str) -> Option<JsValue> {
-        self.bindings
-            .get(name)
-            .cloned()
-            .or_else(|| self.parent.as_ref().and_then(|p| p.borrow().get(name)))
+    pub fn ensure_slots(&mut self, count: usize) {
+        self.slots.resize(count, JsValue::Undefined);
     }
 
-    pub fn set(&mut self, name: String, value: JsValue) {
+    pub fn get_local(&self, slot: usize) -> JsValue {
+        self.slots[slot].clone()
+    }
+
+    pub fn set_local(&mut self, slot: usize, value: JsValue) {
+        self.slots[slot] = value;
+    }
+
+    pub fn get_global(&self, name: &str) -> Option<JsValue> {
+        self.bindings.get(name).cloned().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|p| p.borrow().get_global(name))
+        })
+    }
+
+    pub fn set_global(&mut self, name: String, value: JsValue) {
         self.bindings.insert(name, value);
     }
 }
@@ -139,7 +167,7 @@ impl Vm {
         let global_env = Rc::new(RefCell::new(Environment::new()));
         Self {
             stack: Vec::new(),
-            frames: vec![CallFrame::new(Vec::new(), global_env)],
+            frames: vec![CallFrame::new(Vec::new(), global_env, Vec::new())],
         }
     }
 
@@ -147,21 +175,36 @@ impl Vm {
         self.frames.last().unwrap().env.clone()
     }
 
-    pub fn run(&mut self, bytecode: &[OpCode]) -> Result<(), RuntimeError> {
+    pub fn run(
+        &mut self,
+        bytecode: &[OpCode],
+        constants: &ConstantPool,
+    ) -> Result<(), RuntimeError> {
         let global_env = self.frames[0].env.clone();
-        self.frames = vec![CallFrame::new(bytecode.to_vec(), global_env)];
+        self.frames = vec![CallFrame::new(
+            bytecode.to_vec(),
+            global_env,
+            constants.to_vec(),
+        )];
 
         self.stack.clear();
 
         while !self.frames.is_empty() {
-            let frame = self.frames.last().unwrap();
-            if frame.ip >= frame.bytecode.len() {
-                self.frames.pop();
-                continue;
-            }
+            let (op, ip) = {
+                let frame = self.frames.last().unwrap();
+                if frame.ip >= frame.bytecode.len() {
+                    self.frames.pop();
+                    continue;
+                }
 
-            let op = frame.bytecode[frame.ip].clone();
-            self.frames.last_mut().unwrap().ip += 1;
+                let op = frame.bytecode[frame.ip].clone();
+                (op, frame.ip)
+            };
+
+            self.frames.last_mut().unwrap().ip = ip + 1;
+
+            let frame = self.frames.last().unwrap();
+            let constants = &frame.constants;
 
             match op {
                 OpCode::PushNull => {
@@ -203,23 +246,38 @@ impl Vm {
                     break;
                 }
 
-                OpCode::SlowPushValue(val) => self.stack.push(val.clone()),
-                OpCode::SlowDeclareVar => {
-                    let name = self.stack.pop().unwrap();
+                OpCode::PushConstant(index) => {
+                    self.stack.push(constants[index].clone());
+                }
+
+                OpCode::DeclareLocal(count) => {
+                    self.current_env().borrow_mut().ensure_slots(count);
+                }
+                OpCode::GetLocal(slot) => {
+                    let value = self.current_env().borrow().get_local(slot);
+                    self.stack.push(value);
+                }
+                OpCode::SetLocal(slot) => {
+                    let value = self.stack.pop().unwrap();
+                    self.current_env().borrow_mut().set_local(slot, value);
+                }
+
+                OpCode::DeclareGlobal(index) => {
+                    let name = &constants[index];
                     match name {
                         JsValue::String(name) => {
                             self.current_env()
                                 .borrow_mut()
-                                .set(name.clone(), JsValue::Undefined);
+                                .set_global(name.clone(), JsValue::Undefined);
                         }
                         _ => panic!("Invalid variable name"),
                     };
                 }
-                OpCode::SlowGetVar => {
-                    let name = self.stack.pop().unwrap();
+                OpCode::GetGlobal(index) => {
+                    let name = &constants[index];
                     match name {
                         JsValue::String(name) => {
-                            let result = self.current_env().borrow().get(&name);
+                            let result = self.current_env().borrow().get_global(name);
                             self.stack.push(
                                 result.ok_or_else(|| RuntimeError::ReferenceError(name.clone()))?,
                             );
@@ -227,12 +285,14 @@ impl Vm {
                         _ => panic!("Invalid variable name"),
                     }
                 }
-                OpCode::SlowSetVar => {
-                    let name = self.stack.pop().unwrap();
+                OpCode::SetGlobal(index) => {
+                    let name = &constants[index];
                     let value = self.stack.pop().unwrap();
                     match name {
                         JsValue::String(name) => {
-                            self.current_env().borrow_mut().set(name, value);
+                            self.current_env()
+                                .borrow_mut()
+                                .set_global(name.clone(), value);
                         }
                         _ => panic!("Invalid variable name"),
                     }
@@ -255,14 +315,17 @@ impl Vm {
 
                             {
                                 let mut env_mut = func_env.borrow_mut();
-                                for (i, param) in func.params.iter().enumerate() {
-                                    let arg = args.get(i).cloned().unwrap_or(JsValue::Undefined);
-                                    env_mut.set(param.clone(), arg);
+                                env_mut.ensure_slots(func.params.len());
+                                for (i, arg) in args.into_iter().enumerate() {
+                                    env_mut.set_local(i, arg);
                                 }
                             }
 
-                            self.frames
-                                .push(CallFrame::new(func.bytecode.clone(), func_env));
+                            self.frames.push(CallFrame::new(
+                                func.bytecode.clone(),
+                                func_env,
+                                func.constants.clone(),
+                            ));
                         }
                         _ => panic!("not a function"),
                     }

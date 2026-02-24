@@ -1,12 +1,5 @@
-use crate::{
-    ast::{
-        self, BinaryOperator, BlockStatement, CallExpression, Declaration, Expression,
-        ExpressionStatement, FunctionDeclaration, Identifier, IfStatement, Literal,
-        ObjectExpression, Pattern, Program, Property, PropertyKey, PropertyKind, ReturnStatement,
-        Statement, VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
-    },
-    lexer::{LexerError, Token, TokenKind},
-};
+use crate::ast::*;
+use crate::lexer::{LexerError, Token, TokenKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -67,11 +60,31 @@ impl Parser {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::Eof) {
-            let stmt = self.parse_statement()?;
-            body.push(stmt);
+            let item = self.parse_program_body_item()?;
+            body.push(item);
         }
 
         Ok(Program { body })
+    }
+
+    fn parse_program_body_item(&mut self) -> Result<StatementOrDirective, ParseError> {
+        // Check directive
+        if let TokenKind::StringLit(s) = self.current() {
+            let s = s.clone();
+            let pos_before = self.pos;
+            self.advance();
+            if let TokenKind::Semi = self.current() {
+                self.advance();
+                return Ok(StatementOrDirective::Directive(Directive {
+                    expression: Literal::String(s.clone()),
+                    directive: s,
+                }));
+            }
+            self.pos = pos_before;
+        }
+
+        let stmt = self.parse_statement()?;
+        Ok(StatementOrDirective::Statement(stmt))
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
@@ -138,7 +151,7 @@ impl Parser {
                 let name = name.clone();
                 self.advance();
                 Ok(VariableDeclarator {
-                    id: Identifier { name },
+                    id: Pattern::Identifier(Identifier { name }),
                     init: if self.current() == &TokenKind::Assign {
                         Some(self.parse_initializer()?)
                     } else {
@@ -152,7 +165,7 @@ impl Parser {
 
     fn parse_initializer(&mut self) -> Result<Expression, ParseError> {
         self.expect(TokenKind::Assign)?;
-        self.parse_primary()
+        self.parse_expression()
     }
 
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
@@ -438,7 +451,7 @@ impl Parser {
         let body = self.parse_function_body()?;
         self.expect(TokenKind::RBrace)?;
 
-        Ok(Expression::FunctionExpression(ast::FunctionExpression {
+        Ok(Expression::FunctionExpression(FunctionExpression {
             id: name,
             params,
             body,
