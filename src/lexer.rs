@@ -59,13 +59,26 @@ impl Token {
 pub struct LexerError(String);
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexerError> {
-    let mut tokens = Vec::new();
+    let mut tokens: Vec<Token> = Vec::new();
     let mut remaining = skip_whitespace(input);
 
     while !remaining.is_empty() {
         let (rest, kind) = parse_token(remaining)?;
-        tokens.push(Token::new(kind));
         remaining = skip_whitespace(rest);
+
+        if kind == TokenKind::LineTerminator {
+            match tokens.last() {
+                Some(last) => match last.kind {
+                    TokenKind::Return => {
+                        // Keep LineTerminator
+                    }
+                    _ => continue,
+                },
+                None => continue,
+            }
+        }
+
+        tokens.push(Token::new(kind));
     }
 
     tokens.push(Token::new(TokenKind::Eof));

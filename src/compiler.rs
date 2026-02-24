@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 use thiserror::Error;
@@ -8,29 +9,23 @@ use crate::vm::{ConstantPool, JsFunction, JsValue, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {
-    #[error("{0}")]
-    SyntaxError(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ScopeKind {
-    Global,
-    Function,
+    #[error("{0} is not defined")]
+    ReferenceError(String),
 }
 
 #[derive(Debug)]
 struct Scope {
     variables: HashMap<String, usize>,
     slot_count: usize,
-    kind: ScopeKind,
+    lexical: bool,
 }
 
 impl Scope {
-    fn new(kind: ScopeKind) -> Self {
+    fn new(lexical: bool, start: usize) -> Self {
         Self {
+            lexical,
+            slot_count: start,
             variables: HashMap::new(),
-            slot_count: 0,
-            kind,
         }
     }
 }
@@ -43,27 +38,68 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        Self {
+        let mut compiler = Self {
             bytecode: Vec::new(),
             constants: Vec::new(),
             scopes: Vec::new(),
-        }
+        };
+
+        compiler.begin_scope();
+
+        compiler
     }
 
-    fn begin_scope(&mut self, kind: ScopeKind) {
-        self.scopes.push(Scope::new(kind));
+    fn begin_scope(&mut self) {
+        self.scopes.push(Scope::new(false, 0));
+    }
+
+    fn begin_lexical_scope(&mut self) {
+        let current_scope = self.scopes.last().unwrap();
+        self.scopes.push(Scope::new(true, current_scope.slot_count));
     }
 
     fn end_scope(&mut self) -> usize {
-        self.scopes.pop().map(|s| s.slot_count).unwrap_or(0)
+        if self.scopes.len() > 1 {
+            self.scopes.pop().map(|s| s.slot_count).unwrap_or(0)
+        } else {
+            self.scopes.last().map(|s| s.slot_count).unwrap_or(0)
+        }
     }
 
-    fn declare_variable(&mut self, name: String) -> usize {
-        let scope = self.scopes.last_mut().expect("No scope");
-        let slot = scope.slot_count;
-        scope.slot_count += 1;
-        scope.variables.insert(name, slot);
-        slot
+    /// Create a `var` binding, no lexical scope
+    fn declare_variable(&mut self, name: &str) -> usize {
+        let (idx, scope) = 'a: loop {
+            for (idx, scope) in self.scopes.iter_mut().rev().enumerate() {
+                if scope.lexical {
+                    continue;
+                }
+                break 'a (idx, scope);
+            }
+            unreachable!()
+        };
+
+        match scope.variables.entry(name.to_string()) {
+            Entry::Occupied(entry) => *entry.get(),
+            Entry::Vacant(entry) => {
+                let slot = scope.slot_count;
+                scope.slot_count += 1;
+                entry.insert(slot);
+
+                // Fix inner lexical scope
+                for scope in self.scopes.iter_mut().skip(idx) {
+                    if scope.lexical {
+                        scope.slot_count += 1;
+                        for slot in scope.variables.values_mut() {
+                            *slot += 1;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+
+                slot
+            }
+        }
     }
 
     fn add_constant(&mut self, value: JsValue) -> usize {
@@ -93,9 +129,35 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<CompileResult, CompilerError> {
-        self.begin_scope(ScopeKind::Global);
-        self.compile_program(program)?;
-        self.end_scope();
+        // Remove tailing Halt
+        while let Some(OpCode::Halt) = self.bytecode.last() {
+            self.bytecode.pop();
+        }
+
+        let mut rest_stmts = Vec::new();
+
+        // Hoist [function | var] declarations
+        for item in &program.body {
+            match item {
+                StatementOrDirective::Statement(stmt) => match stmt {
+                    Statement::Declaration(decl) => match decl {
+                        Declaration::FunctionDeclaration(decl) => {
+                            self.compile_function_declaration(decl)?
+                        }
+                        Declaration::VariableDeclaration(decl) => {
+                            self.compile_variable_declaration(decl)?
+                        }
+                    },
+                    _ => rest_stmts.push(stmt),
+                },
+                _ => {} // Ignore directives now
+            }
+        }
+
+        for stmt in rest_stmts {
+            self.compile_statement(stmt)?;
+        }
+
         self.bytecode.push(OpCode::Halt);
 
         let result = CompileResult {
@@ -103,19 +165,7 @@ impl Compiler {
             constants: self.constants.clone(),
         };
 
-        self.bytecode.clear();
-        self.constants.clear();
         Ok(result)
-    }
-
-    fn compile_program(&mut self, program: &Program) -> Result<(), CompilerError> {
-        for item in &program.body {
-            match item {
-                StatementOrDirective::Statement(stmt) => self.compile_statement(stmt)?,
-                StatementOrDirective::Directive(_) => {}
-            }
-        }
-        Ok(())
     }
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), CompilerError> {
@@ -133,8 +183,18 @@ impl Compiler {
             },
             Statement::EmptyStatement => {}
             Statement::ReturnStatement(stmt) => self.compile_return_statement(stmt)?,
+            Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
             _ => unimplemented!(),
         };
+        Ok(())
+    }
+
+    fn compile_block_statement(&mut self, stmt: &BlockStatement) -> Result<(), CompilerError> {
+        self.begin_lexical_scope();
+        for stmt in &stmt.body {
+            self.compile_statement(stmt)?;
+        }
+        self.end_scope();
         Ok(())
     }
 
@@ -147,36 +207,14 @@ impl Compiler {
                 Pattern::Identifier(ident) => &ident.name,
             };
 
-            let scope_kind = self
-                .scopes
-                .last()
-                .map(|s| s.kind)
-                .unwrap_or(ScopeKind::Global);
-
-            match scope_kind {
-                ScopeKind::Global => {
-                    let name_index = self.add_constant(JsValue::String(var_name.to_string()));
-                    self.emit(OpCode::DeclareGlobal(name_index));
-                    if let Some(init) = init {
-                        if let Expression::FunctionExpression(func) = init {
-                            self.compile_function_expression(func, Some(var_name))?;
-                        } else {
-                            self.compile_expression(init)?;
-                        }
-                        self.emit(OpCode::SetGlobal(name_index));
-                    }
+            let slot = self.declare_variable(&var_name);
+            if let Some(init) = init {
+                if let Expression::FunctionExpression(func) = init {
+                    self.compile_function_expression(func, Some(var_name))?;
+                } else {
+                    self.compile_expression(init)?;
                 }
-                ScopeKind::Function => {
-                    let slot = self.declare_variable(var_name.clone());
-                    if let Some(init) = init {
-                        if let Expression::FunctionExpression(func) = init {
-                            self.compile_function_expression(func, Some(var_name))?;
-                        } else {
-                            self.compile_expression(init)?;
-                        }
-                        self.emit(OpCode::SetLocal(slot));
-                    }
-                }
+                self.emit(OpCode::SetLocal(slot));
             }
         }
 
@@ -196,23 +234,14 @@ impl Compiler {
     }
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
-        for (_depth, scope) in self.scopes.iter().enumerate().rev() {
+        for scope in self.scopes.iter().rev() {
             if let Some(&slot) = scope.variables.get(&id.name) {
-                match scope.kind {
-                    ScopeKind::Global => {
-                        break;
-                    }
-                    ScopeKind::Function => {
-                        self.emit(OpCode::GetLocal(slot));
-                    }
-                }
+                self.emit(OpCode::GetLocal(slot));
                 return Ok(());
             }
         }
 
-        let index = self.add_constant(JsValue::String(id.name.to_string()));
-        self.emit(OpCode::GetGlobal(index));
-        Ok(())
+        Err(CompilerError::ReferenceError(id.name.clone()))
     }
 
     fn compile_literal(&mut self, literal: &Literal) -> Result<(), CompilerError> {
@@ -265,10 +294,9 @@ impl Compiler {
         &mut self,
         func: &FunctionDeclaration,
     ) -> Result<(), CompilerError> {
-        let name_index = self.add_constant(JsValue::String(func.id.name.clone()));
-        self.emit(OpCode::DeclareGlobal(name_index));
-        self.compile_function_expression(&((*func).clone().into()), None)?;
-        self.emit(OpCode::SetGlobal(name_index));
+        let slot = self.declare_variable(&func.id.name);
+        self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
+        self.emit(OpCode::SetLocal(slot));
         Ok(())
     }
 
@@ -278,13 +306,13 @@ impl Compiler {
         func_name: Option<&String>,
     ) -> Result<(), CompilerError> {
         let mut func_compiler = Compiler::new();
-        func_compiler.begin_scope(ScopeKind::Function);
+        func_compiler.begin_scope();
 
         for param in &func.params {
             let param_name = match param {
                 Pattern::Identifier(id) => id.name.clone(),
             };
-            func_compiler.declare_variable(param_name);
+            func_compiler.declare_variable(&param_name);
         }
 
         for stmt in &func.body.body {
@@ -351,4 +379,28 @@ impl Compiler {
 pub struct CompileResult {
     pub bytecode: Vec<OpCode>,
     pub constants: ConstantPool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+    use crate::parser::parse;
+
+    #[test]
+    fn test_variable_hoisting() {
+        let program = r#"
+            var a = 1;
+            var a = 2;
+        "#;
+
+        let tokens = tokenize(program).unwrap();
+        let program = parse(tokens).unwrap();
+        let mut complier = Compiler::new();
+        complier.compile(&program).unwrap();
+
+        let scope = &complier.scopes[0];
+        assert_eq!(scope.slot_count, 1);
+        assert_eq!(scope.variables["a"], 0);
+    }
 }

@@ -1,4 +1,7 @@
+use std::io::{self, IsTerminal};
+
 use rustyline::{DefaultEditor, error::ReadlineError};
+
 use slowjs::compiler::Compiler;
 use slowjs::lexer::{TokenKind, tokenize};
 use slowjs::parser::{ParseError, parse};
@@ -10,8 +13,10 @@ enum ReplError {
 }
 
 pub fn run() {
-    println!("Welcome to SlowJS.");
-    println!("Press Ctrl-D to exit.");
+    if io::stdin().is_terminal() {
+        println!("Welcome to SlowJS.");
+        println!("Press Ctrl-D to exit.");
+    }
 
     let mut rl = DefaultEditor::new().expect("Failed to create editor");
     let mut vm = Vm::new();
@@ -38,8 +43,11 @@ pub fn run() {
                 input_buffer.push_str(input);
 
                 match process_input(&input_buffer, &mut compiler, &mut vm) {
-                    Ok(value) => println!("{value}"),
+                    Ok(value) => {
+                        println!("{value}");
+                    }
                     Err(ReplError::ImcompleteInput) => {
+                        input_buffer.push('\n');
                         continue;
                     }
                     Err(ReplError::Other(e)) => {
@@ -77,7 +85,7 @@ fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<Js
 
     let result = compiler.compile(&program).unwrap();
 
-    vm.run(&result.bytecode, &result.constants)
+    vm.run_script(&result.bytecode, &result.constants)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 
     Ok(vm.value().map(|v| v.clone()).unwrap_or(JsValue::Undefined))
