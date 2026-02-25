@@ -19,6 +19,7 @@ pub struct JsFunction {
     pub params: Vec<String>,
     pub bytecode: Vec<OpCode>,
     pub constants: ConstantPool,
+    pub slot_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +96,6 @@ pub enum OpCode {
     Halt,
 
     PushConstant(usize),
-    DeclareLocal(usize),
     GetLocal(usize),
     SetLocal(usize),
 
@@ -196,11 +196,6 @@ impl Vm {
                     let frame = self.frames.last().unwrap();
                     self.stack.push(frame.constants[index].clone());
                 }
-
-                OpCode::DeclareLocal(count) => {
-                    let frame = self.frames.last_mut().unwrap();
-                    frame.slots.resize(count, JsValue::Undefined);
-                }
                 OpCode::GetLocal(slot) => {
                     let frame = self.frames.last().unwrap();
                     self.stack.push(frame.slots[slot].clone());
@@ -212,21 +207,20 @@ impl Vm {
                     frame.slots[slot] = value;
                 }
 
-                // Stack: [func, arg1, arg2, ...]
+                // Stack: [func, arg1, arg2, ...] <- top
                 OpCode::Call(arg_count) => {
-                    let mut args = Vec::new();
+                    let mut arg_stack = Vec::new();
                     for _ in 0..arg_count {
-                        args.push(self.stack.pop().unwrap());
+                        arg_stack.push(self.stack.pop().unwrap());
                     }
-                    args.reverse();
 
                     let func_val = self.stack.pop().unwrap();
 
                     match func_val {
                         JsValue::Function(func) => {
-                            let mut frame_slots = vec![JsValue::Undefined; func.params.len()];
-                            for (i, arg) in args.into_iter().enumerate() {
-                                frame_slots[i] = arg;
+                            let mut frame_slots = vec![JsValue::Undefined; func.slot_count];
+                            for i in 0..func.params.len() {
+                                frame_slots[i] = arg_stack.pop().unwrap_or(JsValue::Undefined);
                             }
 
                             self.frames.push(CallFrame {

@@ -306,7 +306,6 @@ impl Compiler {
         func_name: Option<&String>,
     ) -> Result<(), CompilerError> {
         let mut func_compiler = Compiler::new();
-        func_compiler.begin_scope();
 
         for param in &func.params {
             let param_name = match param {
@@ -325,9 +324,7 @@ impl Compiler {
 
         let slot_count = func_compiler.end_scope();
 
-        let mut final_bytecode = Vec::new();
-        final_bytecode.push(OpCode::DeclareLocal(slot_count));
-        final_bytecode.extend(func_compiler.bytecode);
+        let bytecode = func_compiler.bytecode;
 
         let func_name = func
             .id
@@ -345,8 +342,9 @@ impl Compiler {
                     Pattern::Identifier(id) => id.name.clone(),
                 })
                 .collect(),
-            bytecode: final_bytecode,
+            bytecode,
             constants: func_compiler.constants,
+            slot_count,
         }));
 
         let func_index = self.add_constant(func_val);
