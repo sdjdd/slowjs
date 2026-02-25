@@ -387,6 +387,14 @@ mod tests {
     use crate::lexer::tokenize;
     use crate::parser::parse;
 
+    fn compile(program: &str) -> Compiler {
+        let tokens = tokenize(program).unwrap();
+        let program = parse(tokens).unwrap();
+        let mut complier = Compiler::new();
+        complier.compile(&program).unwrap();
+        complier
+    }
+
     #[test]
     fn test_variable_hoisting() {
         let program = r#"
@@ -394,12 +402,9 @@ mod tests {
             var a = 2;
         "#;
 
-        let tokens = tokenize(program).unwrap();
-        let program = parse(tokens).unwrap();
-        let mut complier = Compiler::new();
-        complier.compile(&program).unwrap();
-
+        let complier = compile(program);
         let scope = &complier.scopes[0];
+
         assert_eq!(scope.slot_count, 1);
         assert_eq!(scope.variables["a"], 0);
     }
