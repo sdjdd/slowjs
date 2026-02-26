@@ -126,17 +126,10 @@ impl Vm {
         constants: &ConstantPool,
     ) -> Result<(), RuntimeError> {
         self.stack.clear();
+        self.frames.clear();
 
-        if self.frames.is_empty() {
-            self.frames
-                .push(CallFrame::new(bytecode.to_vec(), constants.to_vec(), 0));
-        } else {
-            let frame = self.frames.first_mut().unwrap();
-            frame.code_block.code = bytecode.to_vec();
-            frame.code_block.constants = constants.to_vec();
-        }
-
-        self.frames[0].ip = 0;
+        self.frames
+            .push(CallFrame::new(bytecode.to_vec(), constants.to_vec(), 0));
 
         self.run_loop()
     }
