@@ -44,6 +44,7 @@ pub enum TokenKind {
     Eof,
 }
 
+#[derive(Debug)]
 pub struct Token {
     pub kind: TokenKind,
 }

@@ -88,5 +88,5 @@ fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<Js
     vm.run_script(&result.bytecode, &result.constants)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 
-    Ok(vm.value().map(|v| v.clone()).unwrap_or(JsValue::Undefined))
+    Ok(vm.pop().unwrap_or(JsValue::Undefined))
 }

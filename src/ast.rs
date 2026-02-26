@@ -1,14 +1,15 @@
+#[derive(Debug)]
 pub struct Program {
     pub body: Vec<StatementOrDirective>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StatementOrDirective {
     Statement(Statement),
     Directive(Directive),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Directive {
     pub expression: Literal,
     pub directive: String,
@@ -51,6 +52,10 @@ pub struct VariableDeclarator {
 pub enum VariableDeclarationKind {
     Var,
 }
+
+pub type ProgramBody = Vec<StatementOrDirective>;
+
+pub type FunctionBody = Vec<StatementOrDirective>;
 
 #[derive(Debug, Clone)]
 pub struct BlockStatement {
@@ -141,14 +146,14 @@ pub struct IfStatement {
 pub struct FunctionDeclaration {
     pub id: Identifier,
     pub params: Vec<Pattern>,
-    pub body: BlockStatement,
+    pub body: Vec<StatementOrDirective>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionExpression {
     pub id: Option<Identifier>,
     pub params: Vec<Pattern>,
-    pub body: BlockStatement,
+    pub body: Vec<StatementOrDirective>,
 }
 
 impl From<FunctionDeclaration> for FunctionExpression {
@@ -165,8 +170,6 @@ impl From<FunctionDeclaration> for FunctionExpression {
 pub enum Pattern {
     Identifier(Identifier),
 }
-
-pub type FunctionBody = BlockStatement;
 
 #[derive(Debug, Clone)]
 pub struct ReturnStatement {

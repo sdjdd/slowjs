@@ -491,15 +491,15 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_function_body(&mut self) -> Result<BlockStatement, ParseError> {
+    fn parse_function_body(&mut self) -> Result<FunctionBody, ParseError> {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::RBrace) {
-            let stmt = self.parse_statement()?;
+            let stmt = self.parse_program_body_item()?;
             body.push(stmt);
         }
 
-        Ok(BlockStatement { body })
+        Ok(body)
     }
 
     fn parse_return_statement(&mut self) -> Result<ReturnStatement, ParseError> {

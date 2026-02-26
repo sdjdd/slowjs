@@ -5,7 +5,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::vm::{ConstantPool, JsFunction, JsValue, OpCode};
+use crate::vm::{CodeBlock, ConstantPool, JsFunction, JsValue, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {
@@ -16,7 +16,7 @@ pub enum CompilerError {
 #[derive(Debug)]
 struct Scope {
     variables: HashMap<String, usize>,
-    slot_count: usize,
+    next_slot: usize,
     lexical: bool,
 }
 
@@ -24,16 +24,23 @@ impl Scope {
     fn new(lexical: bool, start: usize) -> Self {
         Self {
             lexical,
-            slot_count: start,
+            next_slot: start,
             variables: HashMap::new(),
         }
     }
+}
+
+enum Variable {
+    Global(usize),
+    Local(usize),
 }
 
 pub struct Compiler {
     bytecode: Vec<OpCode>,
     constants: ConstantPool,
     scopes: Vec<Scope>,
+
+    pub handle_directives: bool,
 }
 
 impl Compiler {
@@ -42,6 +49,7 @@ impl Compiler {
             bytecode: Vec::new(),
             constants: Vec::new(),
             scopes: Vec::new(),
+            handle_directives: true,
         };
 
         compiler.begin_scope();
@@ -55,19 +63,19 @@ impl Compiler {
 
     fn begin_lexical_scope(&mut self) {
         let current_scope = self.scopes.last().unwrap();
-        self.scopes.push(Scope::new(true, current_scope.slot_count));
+        self.scopes.push(Scope::new(true, current_scope.next_slot));
     }
 
     fn end_scope(&mut self) -> usize {
         if self.scopes.len() > 1 {
-            self.scopes.pop().map(|s| s.slot_count).unwrap_or(0)
+            self.scopes.pop().map(|s| s.next_slot).unwrap_or(0)
         } else {
-            self.scopes.last().map(|s| s.slot_count).unwrap_or(0)
+            self.scopes.last().map(|s| s.next_slot).unwrap_or(0)
         }
     }
 
     /// Create a `var` binding, no lexical scope
-    fn declare_variable(&mut self, name: &str) -> usize {
+    fn declare_variable(&mut self, name: &str) -> Variable {
         let (idx, scope) = 'a: loop {
             for (idx, scope) in self.scopes.iter_mut().rev().enumerate() {
                 if scope.lexical {
@@ -78,17 +86,17 @@ impl Compiler {
             unreachable!()
         };
 
-        match scope.variables.entry(name.to_string()) {
+        let slot = match scope.variables.entry(name.to_string()) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
-                let slot = scope.slot_count;
-                scope.slot_count += 1;
+                let slot = scope.next_slot;
+                scope.next_slot += 1;
                 entry.insert(slot);
 
-                // Fix inner lexical scope
+                // Update inner lexical scope
                 for scope in self.scopes.iter_mut().skip(idx) {
                     if scope.lexical {
-                        scope.slot_count += 1;
+                        scope.next_slot += 1;
                         for slot in scope.variables.values_mut() {
                             *slot += 1;
                         }
@@ -99,6 +107,12 @@ impl Compiler {
 
                 slot
             }
+        };
+
+        if idx == 0 {
+            Variable::Global(slot)
+        } else {
+            Variable::Local(slot)
         }
     }
 
@@ -129,31 +143,9 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<CompileResult, CompilerError> {
-        // Remove tailing Halt
-        while let Some(OpCode::Halt) = self.bytecode.last() {
-            self.bytecode.pop();
-        }
+        self.bytecode.clear();
 
-        let mut rest_stmts = Vec::new();
-
-        // Hoist [function | var] declarations
-        for item in &program.body {
-            match item {
-                StatementOrDirective::Statement(stmt) => match stmt {
-                    Statement::Declaration(decl) => match decl {
-                        Declaration::FunctionDeclaration(decl) => {
-                            self.compile_function_declaration(decl)?
-                        }
-                        Declaration::VariableDeclaration(decl) => {
-                            self.compile_variable_declaration(decl)?
-                        }
-                    },
-                    _ => rest_stmts.push(stmt),
-                },
-                _ => {} // Ignore directives now
-            }
-        }
-
+        let rest_stmts = self.compile_hoisted_statements(&program.body)?;
         for stmt in rest_stmts {
             self.compile_statement(stmt)?;
         }
@@ -207,14 +199,22 @@ impl Compiler {
                 Pattern::Identifier(ident) => &ident.name,
             };
 
-            let slot = self.declare_variable(&var_name);
+            let var = self.declare_variable(&var_name);
             if let Some(init) = init {
                 if let Expression::FunctionExpression(func) = init {
                     self.compile_function_expression(func, Some(var_name))?;
                 } else {
                     self.compile_expression(init)?;
                 }
-                self.emit(OpCode::SetLocal(slot));
+
+                match var {
+                    Variable::Global(slot) => {
+                        self.emit(OpCode::SetGlobal(slot));
+                    }
+                    Variable::Local(slot) => {
+                        self.emit(OpCode::SetLocal(slot));
+                    }
+                }
             }
         }
 
@@ -234,9 +234,13 @@ impl Compiler {
     }
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
-        for scope in self.scopes.iter().rev() {
+        for (idx, scope) in self.scopes.iter().rev().enumerate() {
             if let Some(&slot) = scope.variables.get(&id.name) {
-                self.emit(OpCode::GetLocal(slot));
+                if idx == 0 {
+                    self.emit(OpCode::GetGlobal(slot));
+                } else {
+                    self.emit(OpCode::GetLocal(slot));
+                }
                 return Ok(());
             }
         }
@@ -294,9 +298,16 @@ impl Compiler {
         &mut self,
         func: &FunctionDeclaration,
     ) -> Result<(), CompilerError> {
-        let slot = self.declare_variable(&func.id.name);
+        let var = self.declare_variable(&func.id.name);
         self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
-        self.emit(OpCode::SetLocal(slot));
+        match var {
+            Variable::Global(slot) => {
+                self.emit(OpCode::SetGlobal(slot));
+            }
+            Variable::Local(slot) => {
+                self.emit(OpCode::SetLocal(slot));
+            }
+        }
         Ok(())
     }
 
@@ -305,26 +316,22 @@ impl Compiler {
         func: &FunctionExpression,
         func_name: Option<&String>,
     ) -> Result<(), CompilerError> {
-        let mut func_compiler = Compiler::new();
+        let mut compiler = Compiler::new();
+        compiler.begin_lexical_scope();
 
         for param in &func.params {
             let param_name = match param {
                 Pattern::Identifier(id) => id.name.clone(),
             };
-            func_compiler.declare_variable(&param_name);
+            compiler.declare_variable(&param_name);
         }
 
-        for stmt in &func.body.body {
-            func_compiler.compile_statement(stmt)?;
-        }
-        if !matches!(func_compiler.bytecode.last(), Some(OpCode::Return)) {
-            func_compiler.emit(OpCode::PushUndefined);
-            func_compiler.emit(OpCode::Return);
+        let rest_stmts = compiler.compile_hoisted_statements(&func.body)?;
+        for stmt in &rest_stmts {
+            compiler.compile_statement(stmt)?;
         }
 
-        let slot_count = func_compiler.end_scope();
-
-        let bytecode = func_compiler.bytecode;
+        let bytecode = compiler.bytecode;
 
         let func_name = func
             .id
@@ -335,16 +342,11 @@ impl Compiler {
 
         let func_val = JsValue::Function(Rc::new(JsFunction {
             name: func_name,
-            params: func
-                .params
-                .iter()
-                .map(|p| match p {
-                    Pattern::Identifier(id) => id.name.clone(),
-                })
-                .collect(),
-            bytecode,
-            constants: func_compiler.constants,
-            slot_count,
+            arity: func.params.len(),
+            code_block: CodeBlock {
+                code: bytecode,
+                constants: compiler.constants,
+            },
         }));
 
         let func_index = self.add_constant(func_val);
@@ -370,6 +372,43 @@ impl Compiler {
         }
         self.emit(OpCode::Return);
         Ok(())
+    }
+
+    fn compile_hoisted_statements<'a>(
+        &mut self,
+        body: &'a [StatementOrDirective],
+    ) -> Result<Vec<&'a Statement>, CompilerError> {
+        let mut rest_stmts = Vec::new();
+
+        // Hoist [function | var] declarations
+        for item in body {
+            match item {
+                StatementOrDirective::Statement(stmt) => {
+                    self.handle_directives = false;
+                    match stmt {
+                        Statement::Declaration(decl) => match decl {
+                            Declaration::FunctionDeclaration(decl) => {
+                                self.compile_function_declaration(decl)?;
+                            }
+                            Declaration::VariableDeclaration(decl) => {
+                                self.compile_variable_declaration(decl)?;
+                            }
+                        },
+                        _ => rest_stmts.push(stmt),
+                    }
+                }
+                StatementOrDirective::Directive(d) => {
+                    if self.handle_directives {
+                        // TODO
+                        continue;
+                    }
+                    eprintln!("handle directive: {}", self.handle_directives);
+                    self.compile_literal(&d.expression)?;
+                }
+            }
+        }
+
+        Ok(rest_stmts)
     }
 }
 
@@ -403,7 +442,7 @@ mod tests {
         let complier = compile(program);
         let scope = &complier.scopes[0];
 
-        assert_eq!(scope.slot_count, 1);
+        assert_eq!(scope.next_slot, 1);
         assert_eq!(scope.variables["a"], 0);
     }
 }

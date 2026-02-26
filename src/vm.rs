@@ -14,34 +14,33 @@ pub enum JsValue {
 pub type ConstantPool = Vec<JsValue>;
 
 #[derive(Debug, Clone)]
-pub struct JsFunction {
-    pub name: String,
-    pub params: Vec<String>,
-    pub bytecode: Vec<OpCode>,
+pub struct CodeBlock {
+    pub code: Vec<OpCode>,
     pub constants: ConstantPool,
-    pub slot_count: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct Upvalue {
-    pub depth: usize,
-    pub slot: usize,
+pub struct JsFunction {
+    pub name: String,
+    pub arity: usize,
+    pub code_block: CodeBlock,
 }
 
 pub struct CallFrame {
-    pub bytecode: Vec<OpCode>,
+    pub code_block: CodeBlock,
     pub ip: usize,
-    pub slots: Vec<JsValue>,
-    pub constants: ConstantPool,
+    pub base: usize,
 }
 
 impl CallFrame {
-    pub fn new(bytecode: Vec<OpCode>, constants: ConstantPool, slot_count: usize) -> Self {
+    pub fn new(bytecode: Vec<OpCode>, constants: ConstantPool, base: usize) -> Self {
         Self {
-            bytecode,
             ip: 0,
-            slots: vec![JsValue::Undefined; slot_count],
-            constants,
+            code_block: CodeBlock {
+                code: bytecode,
+                constants,
+            },
+            base,
         }
     }
 }
@@ -98,6 +97,8 @@ pub enum OpCode {
     PushConstant(usize),
     GetLocal(usize),
     SetLocal(usize),
+    GetGlobal(usize),
+    SetGlobal(usize),
 
     /// Call a function with n arguments
     Call(usize),
@@ -107,6 +108,7 @@ pub enum OpCode {
 pub struct Vm {
     stack: Vec<JsValue>,
     frames: Vec<CallFrame>,
+    globals: Vec<JsValue>,
 }
 
 impl Vm {
@@ -114,6 +116,7 @@ impl Vm {
         Self {
             stack: Vec::new(),
             frames: Vec::new(),
+            globals: Vec::new(),
         }
     }
 
@@ -122,35 +125,37 @@ impl Vm {
         bytecode: &[OpCode],
         constants: &ConstantPool,
     ) -> Result<(), RuntimeError> {
+        self.stack.clear();
+
         if self.frames.is_empty() {
             self.frames
                 .push(CallFrame::new(bytecode.to_vec(), constants.to_vec(), 0));
         } else {
             let frame = self.frames.first_mut().unwrap();
-            frame.bytecode = bytecode.to_vec();
-            frame.constants = constants.to_vec();
+            frame.code_block.code = bytecode.to_vec();
+            frame.code_block.constants = constants.to_vec();
         }
 
         self.frames[0].ip = 0;
-        self.stack.clear();
 
         self.run_loop()
     }
 
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
         while !self.frames.is_empty() {
-            let (op, ip) = {
-                let frame = self.frames.last().unwrap();
-                if frame.ip >= frame.bytecode.len() {
-                    self.frames.pop();
-                    continue;
-                }
+            let frame = self.frames.last_mut().unwrap();
 
-                let op = frame.bytecode[frame.ip].clone();
-                (op, frame.ip)
-            };
+            if frame.ip >= frame.code_block.code.len() {
+                self.stack.truncate(frame.base);
+                self.frames.pop();
+                self.stack.push(JsValue::Undefined);
+                continue;
+            }
 
-            self.frames.last_mut().unwrap().ip = ip + 1;
+            let op = &frame.code_block.code[frame.ip];
+            frame.ip += 1;
+
+            println!("{:?}", op);
 
             match op {
                 OpCode::PushNull => {
@@ -191,51 +196,57 @@ impl Vm {
                 OpCode::Halt => {
                     break;
                 }
-
                 OpCode::PushConstant(index) => {
-                    let frame = self.frames.last().unwrap();
-                    self.stack.push(frame.constants[index].clone());
+                    self.stack.push(frame.code_block.constants[*index].clone());
                 }
-                OpCode::GetLocal(slot) => {
-                    let frame = self.frames.last().unwrap();
-                    self.stack.push(frame.slots[slot].clone());
+                OpCode::GetLocal(index) => {
+                    let value = self.stack[frame.base + 1 + index].clone();
+                    self.stack.push(value);
                 }
-                OpCode::SetLocal(slot) => {
+                OpCode::SetLocal(index) => {
                     let value = self.stack.pop().unwrap();
-                    let frame = self.frames.last_mut().unwrap();
-                    frame.slots.resize(slot + 1, JsValue::Undefined);
-                    frame.slots[slot] = value;
-                }
-
-                // Stack: [func, arg1, arg2, ...] <- top
-                OpCode::Call(arg_count) => {
-                    let mut arg_stack = Vec::new();
-                    for _ in 0..arg_count {
-                        arg_stack.push(self.stack.pop().unwrap());
+                    let index = frame.base + 1 + index;
+                    if index >= self.stack.len() {
+                        self.stack.resize(index + 1, JsValue::Undefined);
                     }
-
-                    let func_val = self.stack.pop().unwrap();
+                    self.stack[index] = value;
+                }
+                OpCode::GetGlobal(index) => {
+                    let value = self.globals[*index].clone();
+                    self.stack.push(value);
+                }
+                OpCode::SetGlobal(index) => {
+                    let value = self.stack.pop().unwrap();
+                    if *index >= self.globals.len() {
+                        self.globals.resize(*index + 1, JsValue::Undefined);
+                    }
+                    self.globals[*index] = value;
+                }
+                OpCode::Call(arg_count) => {
+                    // Stack: [func, arg1, arg2, ...] <- top
+                    let base = self.stack.len() - 1 - *arg_count;
+                    let func_val = self.stack[base].clone();
 
                     match func_val {
                         JsValue::Function(func) => {
-                            let mut frame_slots = vec![JsValue::Undefined; func.slot_count];
-                            for i in 0..func.params.len() {
-                                frame_slots[i] = arg_stack.pop().unwrap_or(JsValue::Undefined);
+                            for _ in 0..func.arity - *arg_count {
+                                self.stack.push(JsValue::Undefined);
                             }
 
                             self.frames.push(CallFrame {
-                                bytecode: func.bytecode.clone(),
+                                code_block: func.code_block.clone(),
                                 ip: 0,
-                                slots: frame_slots,
-                                constants: func.constants.clone(),
+                                base,
                             });
                         }
                         _ => panic!("not a function"),
                     }
                 }
-
                 OpCode::Return => {
+                    let value = self.stack.pop().unwrap();
+                    self.stack.truncate(frame.base);
                     self.frames.pop();
+                    self.stack.push(value);
                 }
             }
         }
@@ -243,7 +254,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn value(&mut self) -> Option<&JsValue> {
-        self.stack.last()
+    pub fn pop(&mut self) -> Option<JsValue> {
+        self.stack.pop()
     }
 }
