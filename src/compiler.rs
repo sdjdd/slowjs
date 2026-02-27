@@ -194,7 +194,7 @@ impl Compiler {
         &mut self,
         decl: &VariableDeclaration,
     ) -> Result<(), CompilerError> {
-        for VariableDeclarator { id, init } in &decl.declarations {
+        for VariableDeclarator { id, init, .. } in &decl.declarations {
             let var_name = match id {
                 Pattern::Identifier(ident) => &ident.name,
             };
@@ -421,11 +421,12 @@ pub struct CompileResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexer::tokenize;
+    use crate::lexer::Lexer;
     use crate::parser::parse;
 
     fn compile(program: &str) -> Compiler {
-        let tokens = tokenize(program).unwrap();
+        let mut lexer = Lexer::new();
+        let tokens = lexer.tokenize(program).unwrap();
         let program = parse(tokens).unwrap();
         let mut complier = Compiler::new();
         complier.compile(&program).unwrap();

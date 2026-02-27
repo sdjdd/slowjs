@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 use slowjs::compiler::Compiler;
-use slowjs::lexer::{TokenKind, tokenize};
+use slowjs::lexer::{Lexer, TokenKind};
 use slowjs::parser::{ParseError, parse};
 use slowjs::vm::{JsValue, Vm};
 
@@ -18,8 +18,9 @@ pub fn run() {
         println!("Press Ctrl-D to exit.");
     }
 
-    let mut rl = DefaultEditor::new().expect("Failed to create editor");
+    let mut rl = DefaultEditor::new().expect("Failed to create REPL");
     let mut vm = Vm::new();
+    let mut lexer = Lexer::new();
     let mut compiler = Compiler::new();
     let mut input_buffer = String::new();
 
@@ -42,7 +43,7 @@ pub fn run() {
 
                 input_buffer.push_str(input);
 
-                match process_input(&input_buffer, &mut compiler, &mut vm) {
+                match process_input(&input_buffer, &mut lexer, &mut compiler, &mut vm) {
                     Ok(value) => {
                         println!("{value}");
                     }
@@ -72,8 +73,15 @@ pub fn run() {
     }
 }
 
-fn process_input(input: &str, compiler: &mut Compiler, vm: &mut Vm) -> Result<JsValue, ReplError> {
-    let tokens = tokenize(input).map_err(|e| ReplError::Other(e.to_string()))?;
+fn process_input(
+    input: &str,
+    lexer: &mut Lexer,
+    compiler: &mut Compiler,
+    vm: &mut Vm,
+) -> Result<JsValue, ReplError> {
+    let tokens = lexer
+        .tokenize(input)
+        .map_err(|e| ReplError::Other(e.to_string()))?;
 
     let program = parse(tokens).map_err(|e| match e {
         ParseError::UnexpectedToken {
