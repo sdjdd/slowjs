@@ -5,6 +5,14 @@ use slowjs::lexer::{Lexer, TokenKind};
 use slowjs::parser::{ParseError, parse};
 use slowjs::vm::{JsValue, Vm};
 
+/// Format a JsValue for REPL output (strings with quotes)
+fn format_value(value: &JsValue) -> String {
+    match value {
+        JsValue::String(s) => format!("'{}'", s),
+        _ => value.to_string(),
+    }
+}
+
 enum ReplError {
     ImcompleteInput,
     Other(String),
@@ -41,7 +49,7 @@ pub fn run() {
 
                 match process_input(&input_buffer, &mut lexer, &mut compiler, &mut vm) {
                     Ok(value) => {
-                        println!("{value}");
+                        println!("{}", format_value(&value));
                     }
                     Err(ReplError::ImcompleteInput) => {
                         input_buffer.push('\n');

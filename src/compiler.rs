@@ -322,38 +322,19 @@ impl Compiler {
         self.compile_expression(&bin_expr.left)?;
         self.compile_expression(&bin_expr.right)?;
 
-        match bin_expr.operator {
-            BinaryOperator::Add => {
-                self.bytecode.push(OpCode::Add);
-            }
-            BinaryOperator::Subtract => {
-                self.bytecode.push(OpCode::Sub);
-            }
-            BinaryOperator::Multiply => {
-                self.bytecode.push(OpCode::Mul);
-            }
-            BinaryOperator::Divide => {
-                self.bytecode.push(OpCode::Div);
-            }
-            BinaryOperator::Equal => {
-                self.bytecode.push(OpCode::Eq);
-            }
-            BinaryOperator::NotEqual => {
-                self.bytecode.push(OpCode::NotEq);
-            }
-            BinaryOperator::LessThan => {
-                self.bytecode.push(OpCode::Less);
-            }
-            BinaryOperator::LessThanEq => {
-                self.bytecode.push(OpCode::LessEq);
-            }
-            BinaryOperator::GreaterThan => {
-                self.bytecode.push(OpCode::Greater);
-            }
-            BinaryOperator::GreaterThanEq => {
-                self.bytecode.push(OpCode::GreaterEq);
-            }
-        }
+        let opcode = match bin_expr.operator {
+            BinaryOperator::Add => OpCode::Add,
+            BinaryOperator::Subtract => OpCode::Sub,
+            BinaryOperator::Multiply => OpCode::Mul,
+            BinaryOperator::Divide => OpCode::Div,
+            BinaryOperator::Equal => OpCode::Eq,
+            BinaryOperator::NotEqual => OpCode::NotEq,
+            BinaryOperator::LessThan => OpCode::Less,
+            BinaryOperator::LessThanEq => OpCode::LessEq,
+            BinaryOperator::GreaterThan => OpCode::Greater,
+            BinaryOperator::GreaterThanEq => OpCode::GreaterEq,
+        };
+        self.bytecode.push(opcode);
         Ok(())
     }
 

@@ -83,7 +83,7 @@ impl std::fmt::Display for JsValue {
                     write!(f, "{}", n)
                 }
             }
-            JsValue::String(s) => write!(f, "'{s}'"),
+            JsValue::String(s) => write!(f, "{s}"),
             JsValue::Function(func) => write!(f, "[Function: {}]", func.name),
             JsValue::Object(obj) => {
                 let props: Vec<String> = obj
@@ -165,6 +165,70 @@ pub enum OpCode {
     GetProperty(usize),
 }
 
+// ============ Abstract Operations for Relational Comparison ============
+
+/// ToNumber abstract operation (ECMAScript 7.1.4)
+fn to_number(value: &JsValue) -> f64 {
+    match value {
+        JsValue::Undefined => f64::NAN,
+        JsValue::Null => 0.0,
+        JsValue::Boolean(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        JsValue::Number(n) => *n,
+        JsValue::String(s) => {
+            if s.is_empty() {
+                0.0
+            } else {
+                s.parse::<f64>().unwrap_or(f64::NAN)
+            }
+        }
+        JsValue::Function(_) | JsValue::Object(_) => f64::NAN,
+    }
+}
+
+/// Relational comparison helper using ToNumber conversion
+fn relational_cmp<F>(left: &JsValue, right: &JsValue, cmp: F) -> bool
+where
+    F: Fn(f64, f64) -> bool,
+{
+    let left_num = to_number(left);
+    let right_num = to_number(right);
+
+    // NaN comparisons always return false
+    if left_num.is_nan() || right_num.is_nan() {
+        false
+    } else {
+        cmp(left_num, right_num)
+    }
+}
+
+/// IsLessThan abstract operation (ECMAScript 7.2.12)
+fn is_less_than(left: &JsValue, right: &JsValue) -> bool {
+    relational_cmp(left, right, |a, b| a < b)
+}
+
+/// LessThanOrEqual operator (<=)
+fn less_than_or_equal(left: &JsValue, right: &JsValue) -> bool {
+    relational_cmp(left, right, |a, b| a <= b)
+}
+
+/// GreaterThan operator (>)
+fn is_greater_than(left: &JsValue, right: &JsValue) -> bool {
+    relational_cmp(left, right, |a, b| a > b)
+}
+
+/// GreaterThanOrEqual operator (>=)
+fn is_greater_than_or_equal(left: &JsValue, right: &JsValue) -> bool {
+    relational_cmp(left, right, |a, b| a >= b)
+}
+
+// ============ Virtual Machine ============
+
 pub struct Vm {
     stack: Vec<JsValue>,
     frames: Vec<CallFrame>,
@@ -190,6 +254,52 @@ impl Vm {
         })));
 
         vm
+    }
+
+    /// Helper to pop two values from stack (right operand first, then left)
+    fn pop_binary(&mut self) -> (JsValue, JsValue) {
+        let b = self
+            .stack
+            .pop()
+            .expect("stack underflow in binary operation");
+        let a = self
+            .stack
+            .pop()
+            .expect("stack underflow in binary operation");
+        (a, b)
+    }
+
+    /// Handle arithmetic binary operations
+    fn binary_arithmetic(&mut self, op: OpCode, op_name: &'static str) -> Result<(), RuntimeError> {
+        let (a, b) = self.pop_binary();
+        let result = match (op, &a, &b) {
+            (OpCode::Add, JsValue::String(a), JsValue::String(b)) => {
+                JsValue::String(format!("{}{}", a, b))
+            }
+            (OpCode::Add, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a + *b),
+            (OpCode::Sub, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a - *b),
+            (OpCode::Mul, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a * *b),
+            (OpCode::Div, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a / *b),
+            _ => {
+                return Err(RuntimeError::TypeError(format!(
+                    "invalid operands for {}",
+                    op_name
+                )));
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
+    /// Handle comparison binary operations
+    fn binary_comparison<F>(&mut self, _op_name: &'static str, cmp: F) -> Result<(), RuntimeError>
+    where
+        F: Fn(&JsValue, &JsValue) -> bool,
+    {
+        let (a, b) = self.pop_binary();
+        let result = cmp(&a, &b);
+        self.stack.push(JsValue::Boolean(result));
+        Ok(())
     }
 
     pub fn run_script(
@@ -232,128 +342,55 @@ impl Vm {
                     self.stack.push(JsValue::Boolean(false));
                 }
                 OpCode::Add => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => {
-                            self.stack.push(JsValue::Number(a + b));
-                        }
-                        (JsValue::String(a), JsValue::String(b)) => {
-                            self.stack.push(JsValue::String(a + &b));
-                        }
-                        _ => {
-                            return Err(RuntimeError::TypeError(
-                                "invalid operands for +".to_string(),
-                            ));
-                        }
-                    }
+                    return self.binary_arithmetic(OpCode::Add, "+");
                 }
                 OpCode::Sub => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => {
-                            self.stack.push(JsValue::Number(a - b));
-                        }
-                        _ => {
-                            return Err(RuntimeError::TypeError(
-                                "invalid operands for -".to_string(),
-                            ));
-                        }
-                    }
+                    return self.binary_arithmetic(OpCode::Sub, "-");
                 }
                 OpCode::Mul => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => {
-                            self.stack.push(JsValue::Number(a * b));
-                        }
-                        _ => {
-                            return Err(RuntimeError::TypeError(
-                                "invalid operands for *".to_string(),
-                            ));
-                        }
-                    }
+                    return self.binary_arithmetic(OpCode::Mul, "*");
                 }
                 OpCode::Div => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => {
-                            self.stack.push(JsValue::Number(a / b));
-                        }
-                        _ => {
-                            return Err(RuntimeError::TypeError(
-                                "invalid operands for /".to_string(),
-                            ));
-                        }
-                    }
+                    return self.binary_arithmetic(OpCode::Div, "/");
                 }
                 OpCode::Eq => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
+                    return self.binary_comparison("==", |a, b| match (a, b) {
                         (JsValue::Number(a), JsValue::Number(b)) => a == b,
                         (JsValue::String(a), JsValue::String(b)) => a == b,
                         (JsValue::Boolean(a), JsValue::Boolean(b)) => a == b,
                         (JsValue::Null, JsValue::Null) => true,
                         (JsValue::Undefined, JsValue::Undefined) => true,
                         _ => false,
-                    };
-                    self.stack.push(JsValue::Boolean(result));
+                    });
                 }
                 OpCode::NotEq => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
+                    return self.binary_comparison("!=", |a, b| match (a, b) {
                         (JsValue::Number(a), JsValue::Number(b)) => a != b,
                         (JsValue::String(a), JsValue::String(b)) => a != b,
                         (JsValue::Boolean(a), JsValue::Boolean(b)) => a != b,
                         (JsValue::Null, JsValue::Null) => false,
                         (JsValue::Undefined, JsValue::Undefined) => false,
                         _ => true,
-                    };
-                    self.stack.push(JsValue::Boolean(result));
+                    });
                 }
                 OpCode::Less => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => a < b,
-                        (JsValue::String(a), JsValue::String(b)) => a < b,
-                        _ => false,
-                    };
+                    let (left, right) = self.pop_binary();
+                    let result = is_less_than(&left, &right);
                     self.stack.push(JsValue::Boolean(result));
                 }
                 OpCode::LessEq => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => a <= b,
-                        (JsValue::String(a), JsValue::String(b)) => a <= b,
-                        _ => false,
-                    };
+                    let (left, right) = self.pop_binary();
+                    let result = less_than_or_equal(&left, &right);
                     self.stack.push(JsValue::Boolean(result));
                 }
                 OpCode::Greater => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => a > b,
-                        (JsValue::String(a), JsValue::String(b)) => a > b,
-                        _ => false,
-                    };
+                    let (left, right) = self.pop_binary();
+                    let result = is_greater_than(&left, &right);
                     self.stack.push(JsValue::Boolean(result));
                 }
                 OpCode::GreaterEq => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    let result = match (a, b) {
-                        (JsValue::Number(a), JsValue::Number(b)) => a >= b,
-                        (JsValue::String(a), JsValue::String(b)) => a >= b,
-                        _ => false,
-                    };
+                    let (left, right) = self.pop_binary();
+                    let result = is_greater_than_or_equal(&left, &right);
                     self.stack.push(JsValue::Boolean(result));
                 }
                 OpCode::Halt => {
@@ -399,11 +436,7 @@ impl Vm {
                                 if i > 0 {
                                     print!(" ");
                                 }
-                                // Print strings without quotes
-                                match arg {
-                                    JsValue::String(s) => print!("{}", s),
-                                    _ => print!("{}", arg),
-                                }
+                                print!("{}", arg);
                             }
                             println!();
                             self.stack.truncate(base);
@@ -453,11 +486,7 @@ impl Vm {
 
                     if let JsValue::Object(obj) = obj_val {
                         let mut props = (*obj).clone();
-                        let key_str = match key {
-                            JsValue::String(s) => s.clone(),
-                            JsValue::Number(n) => n.to_string(),
-                            _ => key.to_string(),
-                        };
+                        let key_str = key.to_string();
                         props.properties.insert(key_str, value);
                         self.stack.push(JsValue::Object(Rc::new(props)));
                     } else {
@@ -469,11 +498,7 @@ impl Vm {
                     let obj_val = self.stack.pop().unwrap();
 
                     if let JsValue::Object(obj) = obj_val {
-                        let key_str = match key {
-                            JsValue::String(s) => s.clone(),
-                            JsValue::Number(n) => n.to_string(),
-                            _ => key.to_string(),
-                        };
+                        let key_str = key.to_string();
                         let value = obj
                             .properties
                             .get(&key_str)

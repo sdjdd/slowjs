@@ -24,7 +24,7 @@ impl SourceLocation {
 
 #[derive(Debug)]
 pub struct Program {
-    pub body: Vec<StatementOrDirective>,
+    pub body: ProgramBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -165,6 +165,17 @@ pub enum LiteralValue {
     String(String),
 }
 
+impl std::fmt::Display for LiteralValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LiteralValue::Null => write!(f, "null"),
+            LiteralValue::Boolean(b) => write!(f, "{}", b),
+            LiteralValue::Number(n) => write!(f, "{}", n),
+            LiteralValue::String(s) => write!(f, "{}", s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     pub value: LiteralValue,
@@ -177,20 +188,9 @@ impl Literal {
     }
 }
 
-impl ToString for Literal {
-    fn to_string(&self) -> String {
-        self.value.to_string()
-    }
-}
-
-impl ToString for LiteralValue {
-    fn to_string(&self) -> String {
-        match self {
-            LiteralValue::Null => "null".to_string(),
-            LiteralValue::Boolean(b) => b.to_string(),
-            LiteralValue::Number(n) => n.to_string(),
-            LiteralValue::String(s) => s.clone(),
-        }
+impl std::fmt::Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
     }
 }
 

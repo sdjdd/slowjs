@@ -46,6 +46,40 @@ impl Parser {
         }
     }
 
+    /// Parse comma-separated list with optional trailing comma
+    fn parse_comma_separated_list<T, F>(
+        &mut self,
+        mut parse_item: F,
+        term: TokenKind,
+    ) -> Result<Vec<T>, ParseError>
+    where
+        F: FnMut(&mut Self) -> Result<T, ParseError>,
+    {
+        let mut items = Vec::new();
+
+        // Handle empty list
+        if *self.current() == term {
+            return Ok(items);
+        }
+
+        loop {
+            items.push(parse_item(self)?);
+
+            if *self.current() == term {
+                break;
+            }
+
+            self.expect(TokenKind::Comma)?;
+
+            // Trailing comma
+            if *self.current() == term {
+                break;
+            }
+        }
+
+        Ok(items)
+    }
+
     fn can_insert_semicolon(&self) -> bool {
         matches!(
             self.current(),
@@ -258,29 +292,7 @@ impl Parser {
     }
 
     fn parse_arguments(&mut self) -> Result<Vec<Expression>, ParseError> {
-        let mut args = Vec::new();
-
-        // No arguments
-        if matches!(self.current(), TokenKind::RParen) {
-            return Ok(args);
-        }
-
-        loop {
-            args.push(self.parse_expression()?);
-
-            if matches!(self.current(), TokenKind::RParen) {
-                break;
-            }
-
-            self.expect(TokenKind::Comma)?;
-
-            // Trailing comma
-            if matches!(self.current(), TokenKind::RParen) {
-                break;
-            }
-        }
-
-        Ok(args)
+        self.parse_comma_separated_list(|p| p.parse_expression(), TokenKind::RParen)
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression, ParseError> {
@@ -414,33 +426,8 @@ impl Parser {
         let mut loc = self.current_loc();
         self.expect(TokenKind::LBrace)?;
 
-        let mut properties = Vec::new();
-
-        // Handle empty object {}
-        if matches!(self.current(), TokenKind::RBrace) {
-            loc.end = self.current_loc().end;
-            self.advance();
-            return Ok(Expression::ObjectExpression(ObjectExpression {
-                properties,
-                loc: Some(loc),
-            }));
-        }
-
-        loop {
-            let property = self.parse_property()?;
-            properties.push(property);
-
-            if matches!(self.current(), TokenKind::RBrace) {
-                break;
-            }
-
-            self.expect(TokenKind::Comma)?;
-
-            // Handle trailing comma
-            if matches!(self.current(), TokenKind::RBrace) {
-                break;
-            }
-        }
+        let properties =
+            self.parse_comma_separated_list(|p| p.parse_property(), TokenKind::RBrace)?;
 
         loc.end = self.current_loc().end;
         self.expect(TokenKind::RBrace)?;
@@ -581,37 +568,18 @@ impl Parser {
     }
 
     fn parse_params(&mut self) -> Result<Vec<Pattern>, ParseError> {
-        let mut params = Vec::new();
-
-        // Handle empty params
-        if matches!(self.current(), TokenKind::RParen) {
-            return Ok(params);
-        }
-
-        loop {
-            match self.current() {
+        self.parse_comma_separated_list(
+            |p| match p.current() {
                 TokenKind::Ident(name) => {
                     let name = name.clone();
-                    let loc = Some(self.current_loc());
-                    self.advance();
-                    params.push(Pattern::Identifier(Identifier { name, loc }));
+                    let loc = Some(p.current_loc());
+                    p.advance();
+                    Ok(Pattern::Identifier(Identifier { name, loc }))
                 }
-                _ => return Err(self.unexpected()),
-            }
-
-            if matches!(self.current(), TokenKind::RParen) {
-                break;
-            }
-
-            self.expect(TokenKind::Comma)?;
-
-            // Handle trailing comma
-            if matches!(self.current(), TokenKind::RParen) {
-                break;
-            }
-        }
-
-        Ok(params)
+                _ => Err(p.unexpected()),
+            },
+            TokenKind::RParen,
+        )
     }
 
     fn parse_function_body(&mut self) -> Result<FunctionBody, ParseError> {
