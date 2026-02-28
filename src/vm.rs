@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -73,6 +74,49 @@ pub struct FunctionObject {
     pub code_block: CodeBlock,
 }
 
+/// Context for formatting JsValue with circular reference tracking
+struct FormatContext {
+    obj_depths: HashMap<usize, usize>,
+    ref_ids: HashMap<usize, usize>,
+    next_ref_id: usize,
+}
+
+impl Default for FormatContext {
+    fn default() -> Self {
+        Self {
+            obj_depths: HashMap::new(),
+            ref_ids: HashMap::new(),
+            next_ref_id: 1,
+        }
+    }
+}
+
+impl FormatContext {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn count_references(&mut self, value: &JsValue, depth: usize) {
+        if let JsValue::Object(obj) = value {
+            let ptr = Rc::as_ptr(obj) as usize;
+            let obj_depth = self.obj_depths.entry(ptr).or_insert(depth);
+            if depth > *obj_depth {
+                self.ref_ids.entry(ptr).or_insert_with(|| {
+                    let id = self.next_ref_id;
+                    self.next_ref_id += 1;
+                    id
+                });
+                return;
+            }
+            if let ObjectKind::Ordinary(o) = &*obj.borrow() {
+                for v in o.properties.values() {
+                    self.count_references(v, depth + 1);
+                }
+            }
+        }
+    }
+}
+
 pub struct CallFrame {
     pub code_block: CodeBlock,
     pub ip: usize,
@@ -94,6 +138,19 @@ impl CallFrame {
 
 impl std::fmt::Display for JsValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ctx = FormatContext::new();
+        // Pre-scan to count all references
+        ctx.count_references(self, 0);
+        self.fmt_inner(f, &mut ctx)
+    }
+}
+
+impl JsValue {
+    fn fmt_inner(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        ctx: &mut FormatContext,
+    ) -> std::fmt::Result {
         match self {
             JsValue::Null => write!(f, "null"),
             JsValue::Undefined => write!(f, "undefined"),
@@ -116,17 +173,43 @@ impl std::fmt::Display for JsValue {
                 }
             }
             JsValue::String(s) => write!(f, "{s}"),
-            JsValue::Object(obj) => match &*obj.borrow() {
-                ObjectKind::Ordinary(obj) => {
-                    let props: Vec<String> = obj
-                        .properties
-                        .iter()
-                        .map(|(k, v)| format!("{}: {}", k, v))
-                        .collect();
-                    write!(f, "{{ {} }}", props.join(", "))
+            JsValue::Object(obj) => {
+                let ptr = Rc::as_ptr(obj) as usize;
+                match &*obj.borrow() {
+                    ObjectKind::Ordinary(obj) => {
+                        if let Some(id) = ctx.ref_ids.get(&ptr) {
+                            write!(f, "<ref *{}> ", id)?;
+                        }
+                        write!(f, "{{ ")?;
+                        let mut first = true;
+                        for (k, v) in &obj.properties {
+                            if !first {
+                                write!(f, ", ")?;
+                            }
+                            first = false;
+                            write!(f, "{}: ", k)?;
+                            match v {
+                                JsValue::Object(o) => {
+                                    let ptr = Rc::as_ptr(o) as usize;
+                                    match &*o.borrow() {
+                                        ObjectKind::Ordinary(_) => {
+                                            if let Some(id) = ctx.ref_ids.get(&ptr) {
+                                                write!(f, "[Circular *{}]", id)?;
+                                            } else {
+                                                v.fmt_inner(f, ctx)?;
+                                            }
+                                        }
+                                        _ => v.fmt_inner(f, ctx)?,
+                                    }
+                                }
+                                _ => v.fmt_inner(f, ctx)?,
+                            };
+                        }
+                        write!(f, " }}")
+                    }
+                    ObjectKind::Function(func) => write!(f, "[Function: {}]", func.name),
                 }
-                ObjectKind::Function(func) => write!(f, "[Function: {}]", func.name),
-            },
+            }
         }
     }
 }
@@ -265,16 +348,12 @@ fn is_greater_than_or_equal(left: &JsValue, right: &JsValue) -> bool {
 pub struct Vm {
     stack: Vec<JsValue>,
     frames: Vec<CallFrame>,
-    globals: Vec<JsValue>,
+    global_obj: GcObject,
 }
 
 impl Vm {
     pub fn new() -> Self {
-        let mut vm = Self {
-            stack: Vec::new(),
-            frames: Vec::new(),
-            globals: Vec::new(),
-        };
+        let global_obj: GcObject = Rc::new(RefCell::new(ObjectKind::Ordinary(Object::new())));
 
         // Initialize builtin print function
         let print_func = FunctionObject {
@@ -286,9 +365,22 @@ impl Vm {
                 constants: vec![],
             },
         };
-        vm.globals.push(JsValue::Object(Rc::new(RefCell::new(
-            ObjectKind::Function(print_func),
-        ))));
+        let print_val = JsValue::Object(Rc::new(RefCell::new(ObjectKind::Function(print_func))));
+
+        global_obj.borrow_mut().set("print".to_string(), print_val);
+        global_obj.borrow_mut().set(
+            "globalThis".to_string(),
+            JsValue::Object(global_obj.clone()),
+        );
+        global_obj
+            .borrow_mut()
+            .set("window".to_string(), JsValue::Object(global_obj.clone()));
+
+        let vm = Self {
+            stack: Vec::new(),
+            frames: Vec::new(),
+            global_obj,
+        };
 
         vm
     }
@@ -448,16 +540,23 @@ impl Vm {
                     }
                     self.stack[index] = value;
                 }
-                OpCode::GetGlobal(index) => {
-                    let value = self.globals[*index].clone();
+                OpCode::GetGlobal(name_index) => {
+                    let name = &frame.code_block.constants[*name_index];
+                    let name_str = match name {
+                        JsValue::String(s) => s.clone(),
+                        _ => unreachable!(),
+                    };
+                    let value = self.global_obj.borrow().get(&name_str);
                     self.stack.push(value);
                 }
-                OpCode::SetGlobal(index) => {
+                OpCode::SetGlobal(name_index) => {
                     let value = self.stack.pop().unwrap();
-                    if *index >= self.globals.len() {
-                        self.globals.resize(*index + 1, JsValue::Undefined);
-                    }
-                    self.globals[*index] = value;
+                    let name = &frame.code_block.constants[*name_index];
+                    let name_str = match name {
+                        JsValue::String(s) => s.clone(),
+                        _ => unreachable!(),
+                    };
+                    self.global_obj.borrow_mut().set(name_str, value);
                 }
                 OpCode::Call(arg_count) => {
                     // Stack: [func, arg1, arg2, ...] <- top

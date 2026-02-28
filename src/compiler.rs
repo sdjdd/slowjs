@@ -31,7 +31,7 @@ impl Scope {
 }
 
 enum Variable {
-    Global(usize),
+    Global,
     Local(usize),
 }
 
@@ -53,9 +53,6 @@ impl Compiler {
         };
 
         compiler.begin_scope();
-
-        // Register builtin functions
-        compiler.declare_variable("print");
 
         compiler
     }
@@ -113,7 +110,7 @@ impl Compiler {
         };
 
         if idx == 0 {
-            Variable::Global(slot)
+            Variable::Global
         } else {
             Variable::Local(slot)
         }
@@ -235,8 +232,9 @@ impl Compiler {
                 }
 
                 match var {
-                    Variable::Global(slot) => {
-                        self.emit(OpCode::SetGlobal(slot));
+                    Variable::Global => {
+                        let name_index = self.add_constant(JsValue::String(var_name.clone()));
+                        self.emit(OpCode::SetGlobal(name_index));
                     }
                     Variable::Local(slot) => {
                         self.emit(OpCode::SetLocal(slot));
@@ -264,7 +262,8 @@ impl Compiler {
         for (idx, scope) in self.scopes.iter().rev().enumerate() {
             if let Some(&slot) = scope.variables.get(&id.name) {
                 if idx == 0 {
-                    self.emit(OpCode::GetGlobal(slot));
+                    let name_index = self.add_constant(JsValue::String(id.name.clone()));
+                    self.emit(OpCode::GetGlobal(name_index));
                 } else {
                     self.emit(OpCode::GetLocal(slot));
                 }
@@ -272,7 +271,9 @@ impl Compiler {
             }
         }
 
-        Err(CompilerError::ReferenceError(id.name.clone()))
+        let name_index = self.add_constant(JsValue::String(id.name.clone()));
+        self.emit(OpCode::GetGlobal(name_index));
+        Ok(())
     }
 
     fn compile_object_expression(&mut self, obj: &ObjectExpression) -> Result<(), CompilerError> {
@@ -345,8 +346,9 @@ impl Compiler {
         let var = self.declare_variable(&func.id.name);
         self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
         match var {
-            Variable::Global(slot) => {
-                self.emit(OpCode::SetGlobal(slot));
+            Variable::Global => {
+                let name_index = self.add_constant(JsValue::String(func.id.name.clone()));
+                self.emit(OpCode::SetGlobal(name_index));
             }
             Variable::Local(slot) => {
                 self.emit(OpCode::SetLocal(slot));
