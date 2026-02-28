@@ -3,7 +3,7 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped, is_not, tag, take_while, take_while1},
     character::complete::{anychar, char, one_of},
-    combinator::{map, opt, recognize},
+    combinator::{map, opt, recognize, value},
     sequence::{delimited, pair},
 };
 use thiserror::Error;
@@ -32,6 +32,14 @@ pub enum TokenKind {
     Minus, // -
     Star,  // *
     Slash, // /
+
+    // Comparison
+    Eq,        // ==
+    NotEq,     // !=
+    Less,      // <
+    LessEq,    // <=
+    Greater,   // >
+    GreaterEq, // >=
 
     Semi,   // ;
     LBrace, // {
@@ -143,6 +151,10 @@ impl Lexer {
                 .map_err(|_| LexerError(input.to_string()));
         }
 
+        if let Ok((rest, kind)) = self.parse_comparison_op(input) {
+            return Ok((rest, kind));
+        }
+
         let ch = input.chars().next().unwrap();
         let (input, kind) = match ch {
             '+' => (&input[1..], TokenKind::Plus),
@@ -157,11 +169,25 @@ impl Lexer {
             ':' => (&input[1..], TokenKind::Colon),
             ',' => (&input[1..], TokenKind::Comma),
             '=' => (&input[1..], TokenKind::Assign),
+            '<' => (&input[1..], TokenKind::Less),
+            '>' => (&input[1..], TokenKind::Greater),
             c => return Err(LexerError(c.to_string())),
         };
         self.pos.column += 1;
 
         Ok((input, kind))
+    }
+
+    fn parse_comparison_op<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
+        let eq = value(TokenKind::Eq, tag("=="));
+        let neq = value(TokenKind::NotEq, tag("!="));
+        let le = value(TokenKind::LessEq, tag("<="));
+        let ge = value(TokenKind::GreaterEq, tag(">="));
+
+        map(alt((eq, neq, le, ge)), |kind| {
+            self.pos.column += 2;
+            kind
+        })(input)
     }
 
     fn parse_line_terminator<'a>(&mut self, input: &'a str) -> IResult<&'a str, &'a str> {
@@ -494,5 +520,22 @@ mod tests {
         let input = "@";
         let result = Lexer::new().tokenize(input);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_comparison_operators() {
+        let input = "== != < <= > >=";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(
+            tokens[..6],
+            [
+                new_token(TokenKind::Eq, (1, 0), (1, 2)),
+                new_token(TokenKind::NotEq, (1, 3), (1, 5)),
+                new_token(TokenKind::Less, (1, 6), (1, 7)),
+                new_token(TokenKind::LessEq, (1, 8), (1, 10)),
+                new_token(TokenKind::Greater, (1, 11), (1, 12)),
+                new_token(TokenKind::GreaterEq, (1, 13), (1, 15)),
+            ]
+        );
     }
 }

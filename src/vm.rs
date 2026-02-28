@@ -131,6 +131,14 @@ pub enum OpCode {
     Mul,
     Div,
 
+    // Comparison
+    Eq,
+    NotEq,
+    Less,
+    LessEq,
+    Greater,
+    GreaterEq,
+
     Halt,
 
     PushConstant(usize),
@@ -163,11 +171,23 @@ pub struct Vm {
 
 impl Vm {
     pub fn new() -> Self {
-        Self {
+        let mut vm = Self {
             stack: Vec::new(),
             frames: Vec::new(),
             globals: Vec::new(),
-        }
+        };
+
+        // Initialize builtin functions
+        vm.globals.push(JsValue::Function(Rc::new(JsFunction {
+            name: "print".to_string(),
+            arity: 0, // Variable arity handled in Call
+            code_block: CodeBlock {
+                code: vec![],
+                constants: vec![],
+            },
+        })));
+
+        vm
     }
 
     pub fn run_script(
@@ -254,6 +274,72 @@ impl Vm {
                         _ => unimplemented!(),
                     }
                 }
+                OpCode::Eq => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a == b,
+                        (JsValue::String(a), JsValue::String(b)) => a == b,
+                        (JsValue::Boolean(a), JsValue::Boolean(b)) => a == b,
+                        (JsValue::Null, JsValue::Null) => true,
+                        (JsValue::Undefined, JsValue::Undefined) => true,
+                        _ => false,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::NotEq => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a != b,
+                        (JsValue::String(a), JsValue::String(b)) => a != b,
+                        (JsValue::Boolean(a), JsValue::Boolean(b)) => a != b,
+                        (JsValue::Null, JsValue::Null) => false,
+                        (JsValue::Undefined, JsValue::Undefined) => false,
+                        _ => true,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::Less => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a < b,
+                        (JsValue::String(a), JsValue::String(b)) => a < b,
+                        _ => false,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::LessEq => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a <= b,
+                        (JsValue::String(a), JsValue::String(b)) => a <= b,
+                        _ => false,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::Greater => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a > b,
+                        (JsValue::String(a), JsValue::String(b)) => a > b,
+                        _ => false,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::GreaterEq => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    let result = match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => a >= b,
+                        (JsValue::String(a), JsValue::String(b)) => a >= b,
+                        _ => false,
+                    };
+                    self.stack.push(JsValue::Boolean(result));
+                }
                 OpCode::Halt => {
                     break;
                 }
@@ -287,6 +373,28 @@ impl Vm {
                     // Stack: [func, arg1, arg2, ...] <- top
                     let base = self.stack.len() - 1 - *arg_count;
                     let func_val = self.stack[base].clone();
+
+                    // Check for builtin functions
+                    if let JsValue::Function(func) = &func_val {
+                        if func.name == "print" {
+                            // Builtin print function - join args with space
+                            for i in 0..*arg_count {
+                                let arg = &self.stack[base + 1 + i];
+                                if i > 0 {
+                                    print!(" ");
+                                }
+                                // Print strings without quotes
+                                match arg {
+                                    JsValue::String(s) => print!("{}", s),
+                                    _ => print!("{}", arg),
+                                }
+                            }
+                            println!();
+                            self.stack.truncate(base);
+                            self.stack.push(JsValue::Undefined);
+                            continue;
+                        }
+                    }
 
                     match func_val {
                         JsValue::Function(func) => {

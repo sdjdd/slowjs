@@ -1,5 +1,3 @@
-use std::io::{self, IsTerminal};
-
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 use slowjs::compiler::Compiler;
@@ -13,10 +11,8 @@ enum ReplError {
 }
 
 pub fn run() {
-    if io::stdin().is_terminal() {
-        println!("Welcome to SlowJS.");
-        println!("Press Ctrl-D to exit.");
-    }
+    println!("Welcome to SlowJS.");
+    println!("Press Ctrl-D to exit.");
 
     let mut rl = DefaultEditor::new().expect("Failed to create REPL");
     let mut vm = Vm::new();

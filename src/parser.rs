@@ -226,7 +226,7 @@ impl Parser {
     }
 
     fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
-        let mut expr = self.parse_additive_expression()?;
+        let mut expr = self.parse_equality_expression()?;
 
         // handle chained call
         loop {
@@ -293,6 +293,42 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_multiplicative_expression()?;
+            left = Expression::new_binary(op, left, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_relational_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_additive_expression()?;
+
+        loop {
+            let op = match self.current() {
+                TokenKind::Less => BinaryOperator::LessThan,
+                TokenKind::LessEq => BinaryOperator::LessThanEq,
+                TokenKind::Greater => BinaryOperator::GreaterThan,
+                TokenKind::GreaterEq => BinaryOperator::GreaterThanEq,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_additive_expression()?;
+            left = Expression::new_binary(op, left, right);
+        }
+
+        Ok(left)
+    }
+
+    fn parse_equality_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_relational_expression()?;
+
+        loop {
+            let op = match self.current() {
+                TokenKind::Eq => BinaryOperator::Equal,
+                TokenKind::NotEq => BinaryOperator::NotEqual,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_relational_expression()?;
             left = Expression::new_binary(op, left, right);
         }
 

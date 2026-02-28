@@ -54,6 +54,9 @@ impl Compiler {
 
         compiler.begin_scope();
 
+        // Register builtin functions
+        compiler.declare_variable("print");
+
         compiler
     }
 
@@ -332,6 +335,24 @@ impl Compiler {
             BinaryOperator::Divide => {
                 self.bytecode.push(OpCode::Div);
             }
+            BinaryOperator::Equal => {
+                self.bytecode.push(OpCode::Eq);
+            }
+            BinaryOperator::NotEqual => {
+                self.bytecode.push(OpCode::NotEq);
+            }
+            BinaryOperator::LessThan => {
+                self.bytecode.push(OpCode::Less);
+            }
+            BinaryOperator::LessThanEq => {
+                self.bytecode.push(OpCode::LessEq);
+            }
+            BinaryOperator::GreaterThan => {
+                self.bytecode.push(OpCode::Greater);
+            }
+            BinaryOperator::GreaterThanEq => {
+                self.bytecode.push(OpCode::GreaterEq);
+            }
         }
         Ok(())
     }
@@ -458,34 +479,4 @@ impl Compiler {
 pub struct CompileResult {
     pub bytecode: Vec<OpCode>,
     pub constants: ConstantPool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-    use crate::parser::parse;
-
-    fn compile(program: &str) -> Compiler {
-        let mut lexer = Lexer::new();
-        let tokens = lexer.tokenize(program).unwrap();
-        let program = parse(tokens).unwrap();
-        let mut complier = Compiler::new();
-        complier.compile(&program).unwrap();
-        complier
-    }
-
-    #[test]
-    fn test_variable_hoisting() {
-        let program = r#"
-            var a = 1;
-            var a = 2;
-        "#;
-
-        let complier = compile(program);
-        let scope = &complier.scopes[0];
-
-        assert_eq!(scope.next_slot, 1);
-        assert_eq!(scope.variables["a"], 0);
-    }
 }

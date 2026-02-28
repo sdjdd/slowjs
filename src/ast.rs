@@ -182,6 +182,14 @@ pub enum BinaryOperator {
     Subtract, // -
     Multiply, // *
     Divide,   // /
+
+    // Comparison
+    Equal,         // ==
+    NotEqual,      // !=
+    LessThan,      // <
+    LessThanEq,    // <=
+    GreaterThan,   // >
+    GreaterThanEq, // >=
 }
 
 #[derive(Debug, Clone, PartialEq)]
