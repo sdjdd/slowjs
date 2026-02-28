@@ -406,4 +406,93 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].kind, TokenKind::Eof);
     }
+
+    #[test]
+    fn test_has_line_break_single_newline() {
+        let input = "a\nb";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+        assert!(!tokens[1].has_line_break);
+    }
+
+    #[test]
+    fn test_has_line_break_carriage_return() {
+        let input = "a\rb";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+    }
+
+    #[test]
+    fn test_has_line_break_crlf() {
+        let input = "a\r\nb";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+    }
+
+    #[test]
+    fn test_has_line_break_multiple_newlines() {
+        let input = "a\n\nb";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+    }
+
+    #[test]
+    fn test_has_line_break_no_line_break() {
+        let input = "a b";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(!tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+    }
+
+    #[test]
+    fn test_has_line_break_with_semicolon() {
+        let input = "var x = 1;\nvar y = 2;";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[4].kind, TokenKind::Semi);
+        assert!(tokens[4].has_line_break);
+    }
+
+    #[test]
+    fn test_has_line_break_return_statement() {
+        let input = "return\n42";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Return);
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Number(42.0));
+    }
+
+    #[test]
+    fn test_line_position_reset() {
+        let input = "a\nb";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].loc.start.line, 1);
+        assert_eq!(tokens[0].loc.end.line, 1);
+        assert_eq!(tokens[1].loc.start.line, 2);
+        assert_eq!(tokens[1].loc.end.line, 2);
+    }
+
+    #[test]
+    fn test_mixed_whitespace_and_newlines() {
+        let input = "a  \n  b";
+        let tokens = Lexer::new().tokenize(input).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
+        assert!(tokens[0].has_line_break);
+        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
+    }
+
+    #[test]
+    fn test_error_invalid_character() {
+        let input = "@";
+        let result = Lexer::new().tokenize(input);
+        assert!(result.is_err());
+    }
 }
