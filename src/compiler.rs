@@ -5,7 +5,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::vm::{CodeBlock, ConstantPool, JsFunction, JsValue, OpCode};
+use crate::vm::{CodeBlock, ConstantPool, FunctionObject, JsValue, Object, ObjectKind, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {
@@ -120,7 +120,7 @@ impl Compiler {
     }
 
     fn add_constant(&mut self, value: JsValue) -> usize {
-        if matches!(value, JsValue::Function(_)) {
+        if matches!(value, JsValue::Object(_)) {
             let index = self.constants.len();
             self.constants.push(value);
             return index;
@@ -384,14 +384,18 @@ impl Compiler {
             .or_else(|| func_name.cloned())
             .unwrap_or_default();
 
-        let func_val = JsValue::Function(Rc::new(JsFunction {
+        let func_obj = FunctionObject {
+            object: Object::new(),
             name: func_name,
             arity: func.params.len(),
             code_block: CodeBlock {
                 code: bytecode,
                 constants: compiler.constants,
             },
-        }));
+        };
+        let func_val = JsValue::Object(Rc::new(std::cell::RefCell::new(ObjectKind::Function(
+            func_obj,
+        ))));
 
         let func_index = self.add_constant(func_val);
         self.emit(OpCode::PushConstant(func_index));
