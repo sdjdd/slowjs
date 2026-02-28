@@ -240,6 +240,25 @@ impl Lexer {
 mod tests {
     use super::*;
 
+    impl From<(usize, usize)> for Position {
+        fn from(value: (usize, usize)) -> Self {
+            Self {
+                line: value.0,
+                column: value.1,
+            }
+        }
+    }
+
+    fn new_token(kind: TokenKind, start: (usize, usize), end: (usize, usize)) -> Token {
+        Token {
+            kind,
+            loc: SourceLocation {
+                start: start.into(),
+                end: end.into(),
+            },
+        }
+    }
+
     #[test]
     fn test_variable() {
         let input = "var num = 100;";
@@ -247,48 +266,12 @@ mod tests {
         assert_eq!(
             tokens,
             vec![
-                Token {
-                    kind: TokenKind::Var,
-                    loc: SourceLocation {
-                        start: Position::new(1, 0),
-                        end: Position::new(1, 3),
-                    },
-                },
-                Token {
-                    kind: TokenKind::Ident("num".to_string()),
-                    loc: SourceLocation {
-                        start: Position::new(1, 4),
-                        end: Position::new(1, 7),
-                    },
-                },
-                Token {
-                    kind: TokenKind::Assign,
-                    loc: SourceLocation {
-                        start: Position::new(1, 8),
-                        end: Position::new(1, 9),
-                    },
-                },
-                Token {
-                    kind: TokenKind::Number(100.0),
-                    loc: SourceLocation {
-                        start: Position::new(1, 10),
-                        end: Position::new(1, 13),
-                    },
-                },
-                Token {
-                    kind: TokenKind::Semi,
-                    loc: SourceLocation {
-                        start: Position::new(1, 13),
-                        end: Position::new(1, 14),
-                    },
-                },
-                Token {
-                    kind: TokenKind::Eof,
-                    loc: SourceLocation {
-                        start: Position::new(1, 14),
-                        end: Position::new(1, 14),
-                    },
-                }
+                new_token(TokenKind::Var, (1, 0), (1, 3)),
+                new_token(TokenKind::Ident("num".to_string()), (1, 4), (1, 7)),
+                new_token(TokenKind::Assign, (1, 8), (1, 9)),
+                new_token(TokenKind::Number(100.0), (1, 10), (1, 13)),
+                new_token(TokenKind::Semi, (1, 13), (1, 14)),
+                new_token(TokenKind::Eof, (1, 14), (1, 14)),
             ]
         )
     }
