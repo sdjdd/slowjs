@@ -176,7 +176,7 @@ impl Compiler {
             Statement::EmptyStatement => {}
             Statement::ReturnStatement(stmt) => self.compile_return_statement(stmt)?,
             Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
-            _ => unimplemented!(),
+            Statement::IfStatement(stmt) => self.compile_if_statement(stmt)?,
         };
         Ok(())
     }
@@ -187,6 +187,30 @@ impl Compiler {
             self.compile_statement(stmt)?;
         }
         self.end_scope();
+        Ok(())
+    }
+
+    fn compile_if_statement(&mut self, stmt: &IfStatement) -> Result<(), CompilerError> {
+        self.compile_expression(&stmt.test)?;
+
+        let else_jump_offset = self.bytecode.len();
+        self.bytecode.push(OpCode::JumpIfFalse(0));
+
+        self.compile_statement(&stmt.consequent)?;
+
+        let end_jump_offset = self.bytecode.len();
+        self.bytecode.push(OpCode::Jump(0));
+
+        let else_addr = self.bytecode.len();
+        self.bytecode[else_jump_offset] = OpCode::JumpIfFalse(else_addr);
+
+        if let Some(alternate) = &stmt.alternate {
+            self.compile_statement(alternate)?;
+        }
+
+        let end_addr = self.bytecode.len();
+        self.bytecode[end_jump_offset] = OpCode::Jump(end_addr);
+
         Ok(())
     }
 
@@ -228,7 +252,7 @@ impl Compiler {
             Expression::Identifier(ident) => self.compile_identifier(ident)?,
             Expression::CallExpression(call) => self.compile_call_expression(call)?,
             Expression::FunctionExpression(func) => self.compile_function_expression(func, None)?,
-            _ => unimplemented!(),
+            Expression::ObjectExpression(obj) => self.compile_object_expression(obj)?,
         }
         Ok(())
     }
@@ -246,6 +270,24 @@ impl Compiler {
         }
 
         Err(CompilerError::ReferenceError(id.name.clone()))
+    }
+
+    fn compile_object_expression(&mut self, obj: &ObjectExpression) -> Result<(), CompilerError> {
+        self.emit(OpCode::NewObject);
+
+        for property in &obj.properties {
+            let key = match &property.key {
+                PropertyKey::Literal(lit) => JsValue::String(lit.to_string()),
+                PropertyKey::Identifier(id) => JsValue::String(id.name.clone()),
+            };
+            let key_index = self.add_constant(key);
+
+            self.compile_expression(&property.value)?;
+
+            self.emit(OpCode::SetProperty(key_index));
+        }
+
+        Ok(())
     }
 
     fn compile_literal(&mut self, literal: &Literal) -> Result<(), CompilerError> {
@@ -285,10 +327,10 @@ impl Compiler {
                 self.bytecode.push(OpCode::Sub);
             }
             BinaryOperator::Multiply => {
-                unimplemented!("multiply operator");
+                self.bytecode.push(OpCode::Mul);
             }
             BinaryOperator::Divide => {
-                unimplemented!("divide operator");
+                self.bytecode.push(OpCode::Div);
             }
         }
         Ok(())

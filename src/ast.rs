@@ -165,6 +165,17 @@ pub enum Literal {
     String(String),
 }
 
+impl ToString for Literal {
+    fn to_string(&self) -> String {
+        match self {
+            Literal::Null => "null".to_string(),
+            Literal::Boolean(b) => b.to_string(),
+            Literal::Number(n) => n.to_string(),
+            Literal::String(s) => s.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     Add,      // +

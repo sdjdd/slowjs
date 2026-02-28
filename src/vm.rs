@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 use thiserror::Error;
 
@@ -9,6 +10,20 @@ pub enum JsValue {
     Number(f64),
     String(String),
     Function(Rc<JsFunction>),
+    Object(Rc<JsObject>),
+}
+
+#[derive(Debug, Clone)]
+pub struct JsObject {
+    pub properties: HashMap<String, JsValue>,
+}
+
+impl JsObject {
+    pub fn new() -> Self {
+        Self {
+            properties: HashMap::new(),
+        }
+    }
 }
 
 pub type ConstantPool = Vec<JsValue>;
@@ -70,6 +85,28 @@ impl std::fmt::Display for JsValue {
             }
             JsValue::String(s) => write!(f, "'{s}'"),
             JsValue::Function(func) => write!(f, "[Function: {}]", func.name),
+            JsValue::Object(obj) => {
+                let props: Vec<String> = obj
+                    .properties
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v))
+                    .collect();
+                write!(f, "{{{}}}", props.join(", "))
+            }
+        }
+    }
+}
+
+impl JsValue {
+    pub fn to_bool(&self) -> bool {
+        match self {
+            JsValue::Null => false,
+            JsValue::Undefined => false,
+            JsValue::Boolean(b) => *b,
+            JsValue::Number(n) => *n != 0.0,
+            JsValue::String(s) => !s.is_empty(),
+            JsValue::Function(_) => true,
+            JsValue::Object(_) => true,
         }
     }
 }
@@ -91,6 +128,8 @@ pub enum OpCode {
 
     Add,
     Sub,
+    Mul,
+    Div,
 
     Halt,
 
@@ -103,6 +142,17 @@ pub enum OpCode {
     /// Call a function with n arguments
     Call(usize),
     Return,
+
+    /// Jump to instruction at index
+    Jump(usize),
+    /// Jump if top of stack is falsy
+    JumpIfFalse(usize),
+
+    NewObject,
+    /// Stack: [object, key, value]
+    SetProperty(usize),
+    /// Stack: [object, key]
+    GetProperty(usize),
 }
 
 pub struct Vm {
@@ -148,8 +198,6 @@ impl Vm {
             let op = &frame.code_block.code[frame.ip];
             frame.ip += 1;
 
-            println!("{:?}", op);
-
             match op {
                 OpCode::PushNull => {
                     self.stack.push(JsValue::Null);
@@ -182,6 +230,26 @@ impl Vm {
                     match (a, b) {
                         (JsValue::Number(a), JsValue::Number(b)) => {
                             self.stack.push(JsValue::Number(a - b));
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
+                OpCode::Mul => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => {
+                            self.stack.push(JsValue::Number(a * b));
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
+                OpCode::Div => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    match (a, b) {
+                        (JsValue::Number(a), JsValue::Number(b)) => {
+                            self.stack.push(JsValue::Number(a / b));
                         }
                         _ => unimplemented!(),
                     }
@@ -240,6 +308,57 @@ impl Vm {
                     self.stack.truncate(frame.base);
                     self.frames.pop();
                     self.stack.push(value);
+                }
+                OpCode::Jump(addr) => {
+                    frame.ip = *addr;
+                }
+                OpCode::JumpIfFalse(addr) => {
+                    let value = self.stack.pop().unwrap();
+                    if !value.to_bool() {
+                        frame.ip = *addr;
+                    }
+                }
+                OpCode::NewObject => {
+                    let obj = JsObject::new();
+                    self.stack.push(JsValue::Object(Rc::new(obj)));
+                }
+                OpCode::SetProperty(key_index) => {
+                    let value = self.stack.pop().unwrap();
+                    let key = &frame.code_block.constants[*key_index];
+                    let obj_val = self.stack.pop().unwrap();
+
+                    if let JsValue::Object(obj) = obj_val {
+                        let mut props = (*obj).clone();
+                        let key_str = match key {
+                            JsValue::String(s) => s.clone(),
+                            JsValue::Number(n) => n.to_string(),
+                            _ => key.to_string(),
+                        };
+                        props.properties.insert(key_str, value);
+                        self.stack.push(JsValue::Object(Rc::new(props)));
+                    } else {
+                        panic!("not an object");
+                    }
+                }
+                OpCode::GetProperty(key_index) => {
+                    let key = &frame.code_block.constants[*key_index];
+                    let obj_val = self.stack.pop().unwrap();
+
+                    if let JsValue::Object(obj) = obj_val {
+                        let key_str = match key {
+                            JsValue::String(s) => s.clone(),
+                            JsValue::Number(n) => n.to_string(),
+                            _ => key.to_string(),
+                        };
+                        let value = obj
+                            .properties
+                            .get(&key_str)
+                            .cloned()
+                            .unwrap_or(JsValue::Undefined);
+                        self.stack.push(value);
+                    } else {
+                        panic!("not an object");
+                    }
                 }
             }
         }
