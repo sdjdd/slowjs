@@ -76,14 +76,14 @@ impl Compiler {
 
     /// Create a `var` binding, no lexical scope
     fn declare_variable(&mut self, name: &str) -> Variable {
-        let (idx, scope) = 'a: loop {
+        let (idx, scope) = 'a: {
             for (idx, scope) in self.scopes.iter_mut().rev().enumerate() {
                 if scope.lexical {
                     continue;
                 }
                 break 'a (idx, scope);
             }
-            unreachable!()
+            unreachable!("scope[0] should be not lexical")
         };
 
         let slot = match scope.variables.entry(name.to_string()) {
@@ -199,7 +199,7 @@ impl Compiler {
                 Pattern::Identifier(ident) => &ident.name,
             };
 
-            let var = self.declare_variable(&var_name);
+            let var = self.declare_variable(var_name);
             if let Some(init) = init {
                 if let Expression::FunctionExpression(func) = init {
                     self.compile_function_expression(func, Some(var_name))?;
