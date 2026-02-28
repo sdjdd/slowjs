@@ -294,20 +294,20 @@ impl Compiler {
     }
 
     fn compile_literal(&mut self, literal: &Literal) -> Result<(), CompilerError> {
-        match literal {
-            Literal::Null => self.emit(OpCode::PushNull),
-            Literal::Boolean(b) => {
+        match &literal.value {
+            LiteralValue::Null => self.emit(OpCode::PushNull),
+            LiteralValue::Boolean(b) => {
                 if *b {
                     self.emit(OpCode::PushTrue);
                 } else {
                     self.emit(OpCode::PushFalse);
                 }
             }
-            Literal::Number(n) => {
+            LiteralValue::Number(n) => {
                 let index = self.add_constant(JsValue::Number(*n));
                 self.emit(OpCode::PushConstant(index));
             }
-            Literal::String(s) => {
+            LiteralValue::String(s) => {
                 let index = self.add_constant(JsValue::String(s.clone()));
                 self.emit(OpCode::PushConstant(index));
             }
@@ -465,7 +465,6 @@ impl Compiler {
                         // TODO
                         continue;
                     }
-                    eprintln!("handle directive: {}", self.handle_directives);
                     self.compile_literal(&d.expression)?;
                 }
             }

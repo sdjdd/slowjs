@@ -224,7 +224,7 @@ impl Lexer {
         );
 
         map(alt((double_quoted, single_quoted)), |s: String| {
-            self.pos.column += s.len();
+            self.pos.column += s.len() + 2; // 2 for quotes
             TokenKind::StringLit(s)
         })(input)
     }
@@ -313,20 +313,22 @@ mod tests {
     fn test_strings() {
         let input = r#""hello" 'world' "test \"quoted\"" 'it\'s'"#;
         let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::StringLit("hello".to_string()), (1, 0), (1, 5)),
-                new_token(TokenKind::StringLit("world".to_string()), (1, 6), (1, 11)),
-                new_token(
-                    TokenKind::StringLit("test \\\"quoted\\\"".to_string()),
-                    (1, 12),
-                    (1, 27)
-                ),
-                new_token(TokenKind::StringLit("it\\'s".to_string()), (1, 28), (1, 33)),
-                new_token(TokenKind::Eof, (1, 33), (1, 33)),
-            ]
-        )
+        assert_eq!(tokens.len(), 5);
+
+        let expected = vec![
+            new_token(TokenKind::StringLit("hello".to_string()), (1, 0), (1, 7)),
+            new_token(TokenKind::StringLit("world".to_string()), (1, 8), (1, 15)),
+            new_token(
+                TokenKind::StringLit("test \\\"quoted\\\"".to_string()),
+                (1, 16),
+                (1, 33),
+            ),
+            new_token(TokenKind::StringLit("it\\'s".to_string()), (1, 34), (1, 41)),
+            new_token(TokenKind::Eof, (1, 41), (1, 41)),
+        ];
+        for (test, expected) in tokens.iter().zip(expected.iter()) {
+            assert_eq!(*test, *expected);
+        }
     }
 
     #[test]

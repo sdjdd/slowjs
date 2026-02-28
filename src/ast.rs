@@ -103,7 +103,7 @@ pub enum Expression {
 impl Expression {
     pub fn loc(&self) -> Option<SourceLocation> {
         match self {
-            Expression::Literal(_) => None,
+            Expression::Literal(lit) => lit.loc,
             Expression::Identifier(id) => id.loc,
             Expression::BinaryExpression(bin) => bin.loc,
             Expression::ObjectExpression(obj) => obj.loc,
@@ -158,20 +158,38 @@ pub struct BinaryExpression {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
+pub enum LiteralValue {
     Null,
     Boolean(bool),
     Number(f64),
     String(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Literal {
+    pub value: LiteralValue,
+    pub loc: Option<SourceLocation>,
+}
+
+impl Literal {
+    pub fn new(value: LiteralValue, loc: Option<SourceLocation>) -> Self {
+        Self { value, loc }
+    }
+}
+
 impl ToString for Literal {
     fn to_string(&self) -> String {
+        self.value.to_string()
+    }
+}
+
+impl ToString for LiteralValue {
+    fn to_string(&self) -> String {
         match self {
-            Literal::Null => "null".to_string(),
-            Literal::Boolean(b) => b.to_string(),
-            Literal::Number(n) => n.to_string(),
-            Literal::String(s) => s.clone(),
+            LiteralValue::Null => "null".to_string(),
+            LiteralValue::Boolean(b) => b.to_string(),
+            LiteralValue::Number(n) => n.to_string(),
+            LiteralValue::String(s) => s.clone(),
         }
     }
 }

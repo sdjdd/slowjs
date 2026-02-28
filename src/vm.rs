@@ -117,6 +117,8 @@ pub enum RuntimeError {
     ReferenceError(String),
     #[error("Identifier '{0}' has already been declared")]
     SyntaxError(String),
+    #[error("Type error: {0}")]
+    TypeError(String),
 }
 
 #[derive(Debug, Clone)]
@@ -205,13 +207,11 @@ impl Vm {
     }
 
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
-        while !self.frames.is_empty() {
-            let frame = self.frames.last_mut().unwrap();
-
+        while let Some(frame) = self.frames.last_mut() {
             if frame.ip >= frame.code_block.code.len() {
                 self.stack.truncate(frame.base);
-                self.frames.pop();
                 self.stack.push(JsValue::Undefined);
+                self.frames.pop();
                 continue;
             }
 
@@ -241,7 +241,11 @@ impl Vm {
                         (JsValue::String(a), JsValue::String(b)) => {
                             self.stack.push(JsValue::String(a + &b));
                         }
-                        _ => unimplemented!(),
+                        _ => {
+                            return Err(RuntimeError::TypeError(
+                                "invalid operands for +".to_string(),
+                            ));
+                        }
                     }
                 }
                 OpCode::Sub => {
@@ -251,7 +255,11 @@ impl Vm {
                         (JsValue::Number(a), JsValue::Number(b)) => {
                             self.stack.push(JsValue::Number(a - b));
                         }
-                        _ => unimplemented!(),
+                        _ => {
+                            return Err(RuntimeError::TypeError(
+                                "invalid operands for -".to_string(),
+                            ));
+                        }
                     }
                 }
                 OpCode::Mul => {
@@ -261,7 +269,11 @@ impl Vm {
                         (JsValue::Number(a), JsValue::Number(b)) => {
                             self.stack.push(JsValue::Number(a * b));
                         }
-                        _ => unimplemented!(),
+                        _ => {
+                            return Err(RuntimeError::TypeError(
+                                "invalid operands for *".to_string(),
+                            ));
+                        }
                     }
                 }
                 OpCode::Div => {
@@ -271,7 +283,11 @@ impl Vm {
                         (JsValue::Number(a), JsValue::Number(b)) => {
                             self.stack.push(JsValue::Number(a / b));
                         }
-                        _ => unimplemented!(),
+                        _ => {
+                            return Err(RuntimeError::TypeError(
+                                "invalid operands for /".to_string(),
+                            ));
+                        }
                     }
                 }
                 OpCode::Eq => {
@@ -408,7 +424,7 @@ impl Vm {
                                 base,
                             });
                         }
-                        _ => panic!("not a function"),
+                        _ => return Err(RuntimeError::TypeError("not a function".to_string())),
                     }
                 }
                 OpCode::Return => {
@@ -445,7 +461,7 @@ impl Vm {
                         props.properties.insert(key_str, value);
                         self.stack.push(JsValue::Object(Rc::new(props)));
                     } else {
-                        panic!("not an object");
+                        return Err(RuntimeError::TypeError("not an object".to_string()));
                     }
                 }
                 OpCode::GetProperty(key_index) => {
@@ -465,7 +481,7 @@ impl Vm {
                             .unwrap_or(JsValue::Undefined);
                         self.stack.push(value);
                     } else {
-                        panic!("not an object");
+                        return Err(RuntimeError::TypeError("not an object".to_string()));
                     }
                 }
             }

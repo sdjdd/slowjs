@@ -25,7 +25,10 @@ impl Parser {
     }
 
     fn current(&self) -> &TokenKind {
-        &self.tokens[self.pos].kind
+        self.tokens
+            .get(self.pos)
+            .map(|t| &t.kind)
+            .unwrap_or(&TokenKind::Eof)
     }
 
     fn current_loc(&self) -> SourceLocation {
@@ -34,10 +37,7 @@ impl Parser {
 
     /// Check if previous token had a line break after it (for ASI)
     fn prev_had_line_break(&self) -> bool {
-        if self.pos == 0 {
-            return false;
-        }
-        self.tokens[self.pos - 1].has_line_break
+        self.pos > 0 && self.tokens[self.pos - 1].has_line_break
     }
 
     fn advance(&mut self) {
@@ -88,13 +88,14 @@ impl Parser {
     fn parse_program_body_item(&mut self) -> Result<StatementOrDirective, ParseError> {
         // Check directive
         if let TokenKind::StringLit(s) = self.current() {
+            let loc = self.tokens.get(self.pos).map(|t| t.loc);
             let s = s.clone();
             let pos_before = self.pos;
             self.advance();
             if let TokenKind::Semi = self.current() {
                 self.advance();
                 return Ok(StatementOrDirective::Directive(Directive {
-                    expression: Literal::String(s.clone()),
+                    expression: Literal::new(LiteralValue::String(s.clone()), loc),
                     directive: s,
                 }));
             }
@@ -148,7 +149,7 @@ impl Parser {
         let mut declarations = Vec::new();
 
         loop {
-            declarations.push(self.parse_variable_declration()?);
+            declarations.push(self.parse_variable_declaration()?);
 
             match self.current() {
                 TokenKind::Comma => {
@@ -171,7 +172,7 @@ impl Parser {
         )))
     }
 
-    fn parse_variable_declration(&mut self) -> Result<VariableDeclarator, ParseError> {
+    fn parse_variable_declaration(&mut self) -> Result<VariableDeclarator, ParseError> {
         let mut loc = self.current_loc();
         match self.current() {
             TokenKind::Ident(name) => {
@@ -181,7 +182,7 @@ impl Parser {
 
                 let init = if self.current() == &TokenKind::Assign {
                     let init = self.parse_initializer()?;
-                    loc.end = self.current_loc().start;
+                    loc.end = init.loc().map(|l| l.end).unwrap();
                     Some(init)
                 } else {
                     None
@@ -355,23 +356,39 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
         match self.current() {
             TokenKind::Null => {
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Expression::Literal(Literal::Null))
+                Ok(Expression::Literal(Literal::new(
+                    LiteralValue::Null,
+                    Some(loc),
+                )))
             }
             TokenKind::Boolean(b) => {
+                let loc = self.current_loc();
                 let b = *b;
                 self.advance();
-                Ok(Expression::Literal(Literal::Boolean(b)))
+                Ok(Expression::Literal(Literal::new(
+                    LiteralValue::Boolean(b),
+                    Some(loc),
+                )))
             }
             TokenKind::Number(n) => {
+                let loc = self.current_loc();
                 let n = *n;
                 self.advance();
-                Ok(Expression::Literal(Literal::Number(n)))
+                Ok(Expression::Literal(Literal::new(
+                    LiteralValue::Number(n),
+                    Some(loc),
+                )))
             }
             TokenKind::StringLit(s) => {
+                let loc = self.current_loc();
                 let s = s.clone();
                 self.advance();
-                Ok(Expression::Literal(Literal::String(s)))
+                Ok(Expression::Literal(Literal::new(
+                    LiteralValue::String(s),
+                    Some(loc),
+                )))
             }
             TokenKind::Ident(name) => {
                 let name = name.clone();
@@ -449,12 +466,12 @@ impl Parser {
             TokenKind::StringLit(s) => {
                 let s = s.clone();
                 self.advance();
-                PropertyKey::Literal(Literal::String(s))
+                PropertyKey::Literal(Literal::new(LiteralValue::String(s), Some(loc)))
             }
             TokenKind::Number(n) => {
                 let n = *n;
                 self.advance();
-                PropertyKey::Literal(Literal::Number(n))
+                PropertyKey::Literal(Literal::new(LiteralValue::Number(n), Some(loc)))
             }
             _ => {
                 return Err(self.unexpected());
@@ -661,7 +678,19 @@ mod tests {
                             end: Position { line: 1, column: 7 },
                         }),
                     }),
-                    init: Some(Expression::Literal(Literal::Number(100.0))),
+                    init: Some(Expression::Literal(Literal::new(
+                        LiteralValue::Number(100.0),
+                        Some(SourceLocation {
+                            start: Position {
+                                line: 1,
+                                column: 10
+                            },
+                            end: Position {
+                                line: 1,
+                                column: 13
+                            },
+                        }),
+                    ))),
                     loc: Some(SourceLocation {
                         start: Position { line: 1, column: 4 },
                         end: Position {
