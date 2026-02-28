@@ -32,10 +32,25 @@ impl Parser {
         self.tokens[self.pos].loc
     }
 
+    /// Check if previous token had a line break after it (for ASI)
+    fn prev_had_line_break(&self) -> bool {
+        if self.pos == 0 {
+            return false;
+        }
+        self.tokens[self.pos - 1].has_line_break
+    }
+
     fn advance(&mut self) {
         if self.pos < self.tokens.len() {
             self.pos += 1;
         }
+    }
+
+    fn can_insert_semicolon(&self) -> bool {
+        matches!(
+            self.current(),
+            TokenKind::RBrace | TokenKind::Eof | TokenKind::Semi
+        ) || self.prev_had_line_break()
     }
 
     fn expect(&mut self, expected: TokenKind) -> Result<(), ParseError> {
@@ -44,10 +59,12 @@ impl Parser {
 
         if matches {
             self.advance();
-            Ok(())
-        } else {
-            Err(self.unexpected())
+            return Ok(());
         }
+        if expected == TokenKind::Semi && self.can_insert_semicolon() {
+            return Ok(());
+        }
+        Err(self.unexpected())
     }
 
     fn unexpected(&self) -> ParseError {
@@ -559,10 +576,8 @@ impl Parser {
         let mut loc = self.current_loc();
         self.expect(TokenKind::Return)?;
 
-        if matches!(
-            self.current(),
-            TokenKind::Semi | TokenKind::RBrace | TokenKind::LineTerminator
-        ) {
+        if self.can_insert_semicolon() {
+            self.expect(TokenKind::Semi)?;
             return Ok(ReturnStatement {
                 argument: None,
                 loc: Some(loc),
