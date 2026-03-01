@@ -70,7 +70,7 @@ impl From<Constant> for JsValue {
             Constant::Function(f) => JsValue::Function(Rc::new(RefCell::new(JsFunction::new(
                 f.name,
                 f.arity,
-                FunctionBody::Code(f.code_block),
+                FunctionBody::Script(f.code_block),
             )))),
         }
     }
@@ -103,7 +103,7 @@ pub struct CodeBlock {
 
 #[derive(Clone)]
 pub enum FunctionBody {
-    Code(Rc<CodeBlock>),
+    Script(Rc<CodeBlock>),
     Native(fn(&[JsValue]) -> Option<JsValue>),
 }
 
@@ -617,11 +617,10 @@ impl Vm {
                     let base = self.stack.len() - 1 - *arg_count;
                     let func_val = self.stack[base].clone();
 
-                    // Check if it's a function object
                     if let JsValue::Function(func) = &func_val {
                         let func = &*func.borrow();
                         match &func.body {
-                            FunctionBody::Code(code) => {
+                            FunctionBody::Script(code) => {
                                 for _ in 1..func.arity.saturating_sub(*arg_count) {
                                     self.stack.push(JsValue::Undefined);
                                 }
@@ -745,7 +744,7 @@ impl Vm {
                     let func = JsFunction::new(
                         tmpl.name.clone(),
                         tmpl.arity,
-                        FunctionBody::Code(tmpl.code_block.clone()),
+                        FunctionBody::Script(tmpl.code_block.clone()),
                     );
                     let value = JsValue::Function(Rc::new(RefCell::new(func.clone())));
                     self.stack.push(value);
