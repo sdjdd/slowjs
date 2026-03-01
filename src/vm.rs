@@ -621,7 +621,7 @@ impl Vm {
                         let func = &*func.borrow();
                         match &func.body {
                             FunctionBody::Script(code) => {
-                                for _ in 1..func.arity.saturating_sub(*arg_count) {
+                                for _ in *arg_count..func.arity {
                                     self.stack.push(JsValue::Undefined);
                                 }
                                 self.frames.push(CallFrame {
@@ -633,7 +633,7 @@ impl Vm {
                             FunctionBody::Native(native_func) => {
                                 let mut args =
                                     Vec::from(&self.stack[base + 1..base + 1 + *arg_count]);
-                                for _ in 1..func.arity.saturating_sub(*arg_count) {
+                                for _ in *arg_count..func.arity {
                                     args.push(JsValue::Undefined);
                                 }
                                 self.stack.truncate(base);
