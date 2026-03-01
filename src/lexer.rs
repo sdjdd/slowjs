@@ -33,6 +33,12 @@ pub enum TokenKind {
     Star,  // *
     Slash, // /
 
+    // Assignment
+    PlusAssign,  // +=
+    MinusAssign, // -=
+    StarAssign,  // *=
+    SlashAssign, // /=
+
     // Comparison
     Eq,        // ==
     NotEq,     // !=
@@ -41,14 +47,17 @@ pub enum TokenKind {
     Greater,   // >
     GreaterEq, // >=
 
-    Semi,   // ;
-    LBrace, // {
-    RBrace, // }
-    LParen, // (
-    RParen, // )
-    Colon,  // :
-    Comma,  // ,
-    Assign, // =
+    Semi,     // ;
+    LBrace,   // {
+    RBrace,   // }
+    LBracket, // [
+    RBracket, // ]
+    LParen,   // (
+    RParen,   // )
+    Colon,    // :
+    Comma,    // ,
+    Assign,   // =
+    Dot,      // .
 
     Eof,
 }
@@ -151,7 +160,7 @@ impl Lexer {
                 .map_err(|_| LexerError(input.to_string()));
         }
 
-        if let Ok((rest, kind)) = self.parse_comparison_op(input) {
+        if let Ok((rest, kind)) = self.parse_binary_op(input) {
             return Ok((rest, kind));
         }
 
@@ -171,6 +180,9 @@ impl Lexer {
             '=' => (&input[1..], TokenKind::Assign),
             '<' => (&input[1..], TokenKind::Less),
             '>' => (&input[1..], TokenKind::Greater),
+            '.' => (&input[1..], TokenKind::Dot),
+            '[' => (&input[1..], TokenKind::LBracket),
+            ']' => (&input[1..], TokenKind::RBracket),
             c => return Err(LexerError(c.to_string())),
         };
         self.pos.column += 1;
@@ -178,13 +190,24 @@ impl Lexer {
         Ok((input, kind))
     }
 
-    fn parse_comparison_op<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
+    fn parse_binary_op<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
+        // Comparison
         let eq = value(TokenKind::Eq, tag("=="));
         let neq = value(TokenKind::NotEq, tag("!="));
         let le = value(TokenKind::LessEq, tag("<="));
         let ge = value(TokenKind::GreaterEq, tag(">="));
 
-        map(alt((eq, neq, le, ge)), |kind| {
+        // Assignment
+        let add_assign = value(TokenKind::PlusAssign, tag("+="));
+        let sub_assign = value(TokenKind::MinusAssign, tag("-="));
+        let mul_assign = value(TokenKind::StarAssign, tag("*="));
+        let div_assign = value(TokenKind::SlashAssign, tag("/="));
+
+        let parse = alt((
+            eq, neq, le, ge, add_assign, sub_assign, mul_assign, div_assign,
+        ));
+
+        map(parse, |kind| {
             self.pos.column += 2;
             kind
         })(input)

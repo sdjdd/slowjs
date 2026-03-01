@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
 use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum JsValue {
     Null,
     Undefined,
@@ -13,6 +14,15 @@ pub enum JsValue {
     String(String),
     Object(Gc<JsObject>),
     Function(Gc<JsFunction>),
+}
+
+impl Debug for JsValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut ctx = FormatContext::new();
+        // Pre-scan to count all references
+        ctx.count_references(self, 0);
+        self.fmt_inner(f, &mut ctx)
+    }
 }
 
 pub type Gc<T> = Rc<RefCell<T>>;
@@ -60,6 +70,16 @@ impl From<Constant> for JsValue {
                 f.arity,
                 f.code_block,
             )))),
+        }
+    }
+}
+
+impl Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Constant::Number(n) => write!(f, "{}", f64::from_bits(*n)),
+            Constant::String(s) => write!(f, "{}", s),
+            Constant::Function(func) => write!(f, "[Function: {}]", func.name),
         }
     }
 }
@@ -286,10 +306,32 @@ pub enum OpCode {
     JumpIfFalse(usize),
 
     NewObject,
-    /// Stack: [object, key, value]
+
+    /// Set object property by string constant id, keep value on stack.
+    ///
+    /// Stack: `[object, value]` -> `[object]`
+    InitProperty(usize),
+
+    /// Set object property by string constant id, keep value on stack.
+    ///
+    /// Stack: `[object, value]` -> `[value]`
     SetProperty(usize),
-    /// Stack: [object, key]
+
+    /// Get object property by string constant id.
+    ///
+    /// Stack: `[object]` -> `[value]`
     GetProperty(usize),
+
+    /// Get object element.
+    ///
+    /// Stack: `[object, key]` -> `[value]`
+    GetElement,
+
+    /// Set object element.
+    ///
+    /// Stack: `[object, key, value]` -> `[value]`
+    SetElement,
+
     NewFunc(usize),
 }
 
@@ -475,36 +517,36 @@ impl Vm {
                     self.stack.push(JsValue::Boolean(false));
                 }
                 OpCode::Add => {
-                    return self.binary_arithmetic(OpCode::Add, "+");
+                    self.binary_arithmetic(OpCode::Add, "+")?;
                 }
                 OpCode::Sub => {
-                    return self.binary_arithmetic(OpCode::Sub, "-");
+                    self.binary_arithmetic(OpCode::Sub, "-")?;
                 }
                 OpCode::Mul => {
-                    return self.binary_arithmetic(OpCode::Mul, "*");
+                    self.binary_arithmetic(OpCode::Mul, "*")?;
                 }
                 OpCode::Div => {
-                    return self.binary_arithmetic(OpCode::Div, "/");
+                    self.binary_arithmetic(OpCode::Div, "/")?;
                 }
                 OpCode::Eq => {
-                    return self.binary_comparison("==", |a, b| match (a, b) {
+                    self.binary_comparison("==", |a, b| match (a, b) {
                         (JsValue::Number(a), JsValue::Number(b)) => a == b,
                         (JsValue::String(a), JsValue::String(b)) => a == b,
                         (JsValue::Boolean(a), JsValue::Boolean(b)) => a == b,
                         (JsValue::Null, JsValue::Null) => true,
                         (JsValue::Undefined, JsValue::Undefined) => true,
                         _ => false,
-                    });
+                    })?;
                 }
                 OpCode::NotEq => {
-                    return self.binary_comparison("!=", |a, b| match (a, b) {
+                    self.binary_comparison("!=", |a, b| match (a, b) {
                         (JsValue::Number(a), JsValue::Number(b)) => a != b,
                         (JsValue::String(a), JsValue::String(b)) => a != b,
                         (JsValue::Boolean(a), JsValue::Boolean(b)) => a != b,
                         (JsValue::Null, JsValue::Null) => false,
                         (JsValue::Undefined, JsValue::Undefined) => false,
                         _ => true,
-                    });
+                    })?;
                 }
                 OpCode::Less => {
                     let (left, right) = self.pop_binary();
@@ -538,7 +580,7 @@ impl Vm {
                     self.stack.push(value);
                 }
                 OpCode::SetLocal(index) => {
-                    let value = self.stack.pop().unwrap();
+                    let value = self.stack.last().unwrap().clone();
                     let index = frame.base + 1 + index;
                     if index >= self.stack.len() {
                         self.stack.resize(index + 1, JsValue::Undefined);
@@ -555,13 +597,13 @@ impl Vm {
                     self.stack.push(value);
                 }
                 OpCode::SetGlobal(name_index) => {
-                    let value = self.stack.pop().unwrap();
+                    let value = self.stack.last().unwrap();
                     let name = &frame.code_block.constants[*name_index];
                     let name_str = match name {
                         Constant::String(s) => s.clone(),
                         _ => unreachable!(),
                     };
-                    self.global_obj.borrow_mut().set(name_str, value);
+                    self.global_obj.borrow_mut().set(name_str, value.clone());
                 }
                 OpCode::Call(arg_count) => {
                     // Stack: [func, arg1, arg2, ...] <- top
@@ -623,10 +665,18 @@ impl Vm {
                     let gc_obj = Rc::new(RefCell::new(obj));
                     self.stack.push(JsValue::Object(gc_obj));
                 }
+                OpCode::InitProperty(const_id) => {
+                    let value = self.stack.pop().unwrap();
+                    let obj = self.stack.pop().unwrap();
+                    let obj = to_object(obj);
+                    let key = &frame.code_block.constants[*const_id];
+                    obj.borrow_mut().set(key.to_string(), value);
+                    self.stack.push(JsValue::Object(obj));
+                }
                 OpCode::SetProperty(key_index) => {
                     let value = self.stack.pop().unwrap();
-                    let key = &frame.code_block.constants[*key_index];
                     let obj = self.stack.pop().unwrap();
+                    let key = &frame.code_block.constants[*key_index];
 
                     let obj = match obj {
                         JsValue::Object(obj) => obj,
@@ -639,7 +689,6 @@ impl Vm {
                     };
 
                     obj.borrow_mut().set(key, value);
-                    self.stack.push(JsValue::Object(obj));
                 }
                 OpCode::GetProperty(key_index) => {
                     let obj = match self.stack.pop().unwrap() {
@@ -653,6 +702,37 @@ impl Vm {
                     };
 
                     self.stack.push(obj.borrow().get(key));
+                }
+                OpCode::GetElement => {
+                    let key_val = self.stack.pop().unwrap();
+                    let obj = match self.stack.pop().unwrap() {
+                        JsValue::Object(obj) => obj,
+                        _ => return Err(RuntimeError::TypeError("not an object".to_string())),
+                    };
+
+                    let key = match &key_val {
+                        JsValue::String(s) => s.clone(),
+                        JsValue::Number(n) => n.to_string(),
+                        _ => unimplemented!(),
+                    };
+
+                    self.stack.push(obj.borrow().get(&key));
+                }
+                OpCode::SetElement => {
+                    let value = self.stack.pop().unwrap();
+                    let key_val = self.stack.pop().unwrap();
+                    let obj = match self.stack.pop().unwrap() {
+                        JsValue::Object(obj) => obj,
+                        _ => return Err(RuntimeError::TypeError("not an object".to_string())),
+                    };
+
+                    let key = match &key_val {
+                        JsValue::String(s) => s.clone(),
+                        JsValue::Number(n) => n.to_string(),
+                        _ => unimplemented!(),
+                    };
+
+                    obj.borrow_mut().set(key, value);
                 }
                 OpCode::NewFunc(index) => {
                     let tmpl = match &frame.code_block.constants[*index] {
@@ -672,5 +752,13 @@ impl Vm {
 
     pub fn pop(&mut self) -> Option<JsValue> {
         self.stack.pop()
+    }
+}
+
+fn to_object(value: JsValue) -> Gc<JsObject> {
+    match value {
+        JsValue::Object(obj) => obj,
+        JsValue::Function(func) => func.borrow().prototype.clone(),
+        _ => Rc::new(RefCell::new(JsObject::new())),
     }
 }

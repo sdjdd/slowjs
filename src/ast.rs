@@ -98,6 +98,8 @@ pub enum Expression {
     ObjectExpression(ObjectExpression),
     FunctionExpression(FunctionExpression),
     CallExpression(CallExpression),
+    AssignmentExpression(AssignmentExpression),
+    MemberExpression(MemberExpression),
 }
 
 impl Expression {
@@ -109,6 +111,8 @@ impl Expression {
             Expression::ObjectExpression(obj) => obj.loc,
             Expression::FunctionExpression(func) => func.loc,
             Expression::CallExpression(call) => call.loc,
+            Expression::AssignmentExpression(assignment) => assignment.loc,
+            Expression::MemberExpression(member) => member.loc,
         }
     }
 
@@ -266,5 +270,36 @@ pub struct ReturnStatement {
 pub struct CallExpression {
     pub callee: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignmentExpression {
+    pub operator: AssignmentOperator,
+    pub left: Box<AssignmentTarget>,
+    pub right: Box<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssignmentTarget {
+    Pattern(Pattern),
+    Expression(Expression),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssignmentOperator {
+    Assign,         // =
+    AddAssign,      // +=
+    SubtractAssign, // -=
+    MultiplyAssign, // *=
+    DivideAssign,   // /=
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberExpression {
+    pub object: Box<Expression>,
+    pub property: Box<Expression>,
+    pub computed: bool,
     pub loc: Option<SourceLocation>,
 }

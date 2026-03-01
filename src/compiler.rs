@@ -116,6 +116,15 @@ impl Compiler {
         }
     }
 
+    fn resolve_variable(&self, name: &str) -> Variable {
+        for scope in self.scopes.iter().skip(1).rev() {
+            if let Some(slot) = scope.variables.get(name) {
+                return Variable::Local(*slot);
+            }
+        }
+        Variable::Global
+    }
+
     fn add_constant(&mut self, value: Constant) -> usize {
         for (i, existing) in self.constants.iter().enumerate() {
             if *existing == value {
@@ -243,25 +252,25 @@ impl Compiler {
             Expression::CallExpression(call) => self.compile_call_expression(call)?,
             Expression::FunctionExpression(func) => self.compile_function_expression(func, None)?,
             Expression::ObjectExpression(obj) => self.compile_object_expression(obj)?,
+            Expression::AssignmentExpression(assignment) => {
+                self.compile_assignment_expression(assignment)?
+            }
+            Expression::MemberExpression(member) => self.compile_member_expression(member)?,
         }
         Ok(())
     }
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
-        for (idx, scope) in self.scopes.iter().rev().enumerate() {
-            if let Some(&slot) = scope.variables.get(&id.name) {
-                if idx == 0 {
-                    let name_index = self.add_constant(Constant::String(id.name.clone()));
-                    self.emit(OpCode::GetGlobal(name_index));
-                } else {
-                    self.emit(OpCode::GetLocal(slot));
-                }
-                return Ok(());
+        let var = self.resolve_variable(&id.name);
+        match var {
+            Variable::Global => {
+                let name_index = self.add_constant(Constant::String(id.name.clone()));
+                self.emit(OpCode::GetGlobal(name_index));
+            }
+            Variable::Local(slot) => {
+                self.emit(OpCode::GetLocal(slot));
             }
         }
-
-        let name_index = self.add_constant(Constant::String(id.name.clone()));
-        self.emit(OpCode::GetGlobal(name_index));
         Ok(())
     }
 
@@ -277,9 +286,114 @@ impl Compiler {
 
             self.compile_expression(&property.value)?;
 
-            self.emit(OpCode::SetProperty(key_index));
+            self.emit(OpCode::InitProperty(key_index));
         }
 
+        Ok(())
+    }
+
+    fn compile_member_expression(
+        &mut self,
+        member: &MemberExpression,
+    ) -> Result<(), CompilerError> {
+        self.compile_expression(&member.object)?;
+
+        if member.computed {
+            // obj[expr]
+            self.compile_expression(&member.property)?;
+            self.emit(OpCode::GetElement);
+        } else {
+            // obj.property
+            let property_name = match &*member.property {
+                Expression::Identifier(id) => &id.name,
+                _ => unimplemented!(),
+            };
+            let key_index = self.add_constant(Constant::String(property_name.clone()));
+            self.emit(OpCode::GetProperty(key_index));
+        }
+
+        Ok(())
+    }
+
+    fn compile_assignment_expression(
+        &mut self,
+        assignment: &AssignmentExpression,
+    ) -> Result<(), CompilerError> {
+        match &assignment.operator {
+            AssignmentOperator::Assign => {
+                if let AssignmentTarget::Expression(Expression::MemberExpression(member)) =
+                    &*assignment.left
+                {
+                    self.compile_expression(&member.object)?;
+
+                    if member.computed {
+                        self.compile_expression(&member.property)?;
+                        self.compile_expression(&assignment.right)?;
+                        self.emit(OpCode::SetElement);
+                    } else {
+                        self.compile_expression(&assignment.right)?;
+                        let property_name = match &*member.property {
+                            Expression::Identifier(id) => &id.name,
+                            _ => unimplemented!(),
+                        };
+                        let key_index = self.add_constant(Constant::String(property_name.clone()));
+                        self.emit(OpCode::SetProperty(key_index));
+                    }
+                    return Ok(());
+                }
+
+                // Simple assignment: var = value
+                self.compile_expression(&assignment.right)?;
+            }
+            op => {
+                // Compound assignment: get current value, then right side, then apply op
+                self.compile_assignment_target(&assignment.left)?;
+                self.compile_expression(&assignment.right)?;
+
+                let opcode = match op {
+                    AssignmentOperator::AddAssign => OpCode::Add,
+                    AssignmentOperator::SubtractAssign => OpCode::Sub,
+                    AssignmentOperator::MultiplyAssign => OpCode::Mul,
+                    AssignmentOperator::DivideAssign => OpCode::Div,
+                    _ => unreachable!(),
+                };
+                self.emit(opcode);
+            }
+        }
+
+        match &*assignment.left {
+            AssignmentTarget::Pattern(pattern) => match pattern {
+                Pattern::Identifier(id) => {
+                    let var = self.resolve_variable(&id.name);
+                    match var {
+                        Variable::Global => {
+                            let name_index = self.add_constant(Constant::String(id.name.clone()));
+                            self.emit(OpCode::SetGlobal(name_index));
+                        }
+                        Variable::Local(slot) => {
+                            self.emit(OpCode::SetLocal(slot));
+                        }
+                    }
+                }
+            },
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
+
+    fn compile_assignment_target(
+        &mut self,
+        target: &AssignmentTarget,
+    ) -> Result<(), CompilerError> {
+        match target {
+            AssignmentTarget::Pattern(pattern) => match pattern {
+                Pattern::Identifier(id) => self.compile_identifier(id)?,
+            },
+            AssignmentTarget::Expression(expr) => {
+                self.compile_expression(expr)?;
+            }
+        }
         Ok(())
     }
 

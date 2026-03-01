@@ -257,7 +257,41 @@ impl Parser {
     }
 
     fn parse_expression(&mut self) -> Result<Expression, ParseError> {
-        self.parse_call_expression()
+        self.parse_assignment_expression()
+    }
+
+    fn parse_assignment_expression(&mut self) -> Result<Expression, ParseError> {
+        let left = self.parse_call_expression()?;
+
+        let operator = match self.current() {
+            TokenKind::Assign => AssignmentOperator::Assign,
+            TokenKind::PlusAssign => AssignmentOperator::AddAssign,
+            TokenKind::MinusAssign => AssignmentOperator::SubtractAssign,
+            TokenKind::StarAssign => AssignmentOperator::MultiplyAssign,
+            TokenKind::SlashAssign => AssignmentOperator::DivideAssign,
+            _ => return Ok(left),
+        };
+
+        self.advance();
+
+        let right = self.parse_assignment_expression()?;
+
+        let loc = SourceLocation::new(
+            left.loc().map(|l| l.start).unwrap(),
+            right.loc().map(|l| l.end).unwrap(),
+        );
+
+        let target = match left {
+            Expression::Identifier(id) => AssignmentTarget::Pattern(Pattern::Identifier(id)),
+            _ => AssignmentTarget::Expression(left),
+        };
+
+        Ok(Expression::AssignmentExpression(AssignmentExpression {
+            operator,
+            left: Box::new(target),
+            right: Box::new(right),
+            loc: Some(loc),
+        }))
     }
 
     fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
@@ -267,6 +301,45 @@ impl Parser {
         loop {
             if matches!(self.current(), TokenKind::LParen) {
                 expr = self.parse_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_member_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            if matches!(self.current(), TokenKind::Dot) {
+                self.advance();
+                let property = self.parse_identifier()?;
+                let loc = SourceLocation::new(
+                    expr.loc().map(|l| l.start).unwrap(),
+                    property.loc.map(|l| l.end).unwrap(),
+                );
+                expr = Expression::MemberExpression(MemberExpression {
+                    object: Box::new(expr),
+                    property: Box::new(Expression::Identifier(property)),
+                    computed: false,
+                    loc: Some(loc),
+                });
+            } else if matches!(self.current(), TokenKind::LBracket) {
+                self.advance();
+                let property = self.parse_expression()?;
+                self.expect(TokenKind::RBracket)?;
+                let loc = SourceLocation::new(
+                    expr.loc().map(|l| l.start).unwrap(),
+                    property.loc().map(|l| l.end).unwrap(),
+                );
+                expr = Expression::MemberExpression(MemberExpression {
+                    object: Box::new(expr),
+                    property: Box::new(property),
+                    computed: true,
+                    loc: Some(loc),
+                });
             } else {
                 break;
             }
@@ -349,7 +422,7 @@ impl Parser {
     }
 
     fn parse_multiplicative_expression(&mut self) -> Result<Expression, ParseError> {
-        let mut left = self.parse_primary()?;
+        let mut left = self.parse_member_expression()?;
 
         loop {
             let op = match self.current() {
@@ -358,7 +431,7 @@ impl Parser {
                 _ => break,
             };
             self.advance();
-            let right = self.parse_primary()?;
+            let right = self.parse_member_expression()?;
             left = Expression::new_binary(op, left, right);
         }
 
@@ -411,6 +484,18 @@ impl Parser {
             TokenKind::Function => self.parse_function_expression(),
             TokenKind::LBrace => self.parse_object_expression(),
             TokenKind::LParen => self.parse_paren_expression(),
+            _ => Err(self.unexpected()),
+        }
+    }
+
+    fn parse_identifier(&mut self) -> Result<Identifier, ParseError> {
+        match self.current() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                let loc = Some(self.current_loc());
+                self.advance();
+                Ok(Identifier { name, loc })
+            }
             _ => Err(self.unexpected()),
         }
     }
