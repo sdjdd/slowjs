@@ -5,7 +5,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::vm::{CodeBlock, ConstantPool, FunctionObject, JsValue, Object, ObjectKind, OpCode};
+use crate::vm::{CodeBlock, Constant, ConstantPool, FunctionTemplate, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {
@@ -116,21 +116,10 @@ impl Compiler {
         }
     }
 
-    fn add_constant(&mut self, value: JsValue) -> usize {
-        if matches!(value, JsValue::Object(_)) {
-            let index = self.constants.len();
-            self.constants.push(value);
-            return index;
-        }
-
+    fn add_constant(&mut self, value: Constant) -> usize {
         for (i, existing) in self.constants.iter().enumerate() {
-            match (&value, existing) {
-                (JsValue::String(a), JsValue::String(b)) if a == b => return i,
-                (JsValue::Number(a), JsValue::Number(b)) if a == b => return i,
-                (JsValue::Boolean(a), JsValue::Boolean(b)) if a == b => return i,
-                (JsValue::Null, JsValue::Null) => return i,
-                (JsValue::Undefined, JsValue::Undefined) => return i,
-                _ => continue,
+            if *existing == value {
+                return i;
             }
         }
         let index = self.constants.len();
@@ -233,7 +222,7 @@ impl Compiler {
 
                 match var {
                     Variable::Global => {
-                        let name_index = self.add_constant(JsValue::String(var_name.clone()));
+                        let name_index = self.add_constant(Constant::String(var_name.clone()));
                         self.emit(OpCode::SetGlobal(name_index));
                     }
                     Variable::Local(slot) => {
@@ -262,7 +251,7 @@ impl Compiler {
         for (idx, scope) in self.scopes.iter().rev().enumerate() {
             if let Some(&slot) = scope.variables.get(&id.name) {
                 if idx == 0 {
-                    let name_index = self.add_constant(JsValue::String(id.name.clone()));
+                    let name_index = self.add_constant(Constant::String(id.name.clone()));
                     self.emit(OpCode::GetGlobal(name_index));
                 } else {
                     self.emit(OpCode::GetLocal(slot));
@@ -271,7 +260,7 @@ impl Compiler {
             }
         }
 
-        let name_index = self.add_constant(JsValue::String(id.name.clone()));
+        let name_index = self.add_constant(Constant::String(id.name.clone()));
         self.emit(OpCode::GetGlobal(name_index));
         Ok(())
     }
@@ -281,8 +270,8 @@ impl Compiler {
 
         for property in &obj.properties {
             let key = match &property.key {
-                PropertyKey::Literal(lit) => JsValue::String(lit.to_string()),
-                PropertyKey::Identifier(id) => JsValue::String(id.name.clone()),
+                PropertyKey::Literal(lit) => Constant::String(lit.to_string()),
+                PropertyKey::Identifier(id) => Constant::String(id.name.clone()),
             };
             let key_index = self.add_constant(key);
 
@@ -305,11 +294,11 @@ impl Compiler {
                 }
             }
             LiteralValue::Number(n) => {
-                let index = self.add_constant(JsValue::Number(*n));
+                let index = self.add_constant(Constant::Number(n.to_bits()));
                 self.emit(OpCode::PushConstant(index));
             }
             LiteralValue::String(s) => {
-                let index = self.add_constant(JsValue::String(s.clone()));
+                let index = self.add_constant(Constant::String(s.clone()));
                 self.emit(OpCode::PushConstant(index));
             }
         }
@@ -347,7 +336,7 @@ impl Compiler {
         self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
         match var {
             Variable::Global => {
-                let name_index = self.add_constant(JsValue::String(func.id.name.clone()));
+                let name_index = self.add_constant(Constant::String(func.id.name.clone()));
                 self.emit(OpCode::SetGlobal(name_index));
             }
             Variable::Local(slot) => {
@@ -386,21 +375,17 @@ impl Compiler {
             .or_else(|| func_name.cloned())
             .unwrap_or_default();
 
-        let func_obj = FunctionObject {
-            object: Object::new(),
+        let func = FunctionTemplate {
             name: func_name,
             arity: func.params.len(),
-            code_block: CodeBlock {
+            code_block: Rc::new(CodeBlock {
                 code: bytecode,
                 constants: compiler.constants,
-            },
+            }),
         };
-        let func_val = JsValue::Object(Rc::new(std::cell::RefCell::new(ObjectKind::Function(
-            func_obj,
-        ))));
 
-        let func_index = self.add_constant(func_val);
-        self.emit(OpCode::PushConstant(func_index));
+        let index = self.add_constant(Constant::Function(func));
+        self.emit(OpCode::NewFunc(index));
         Ok(())
     }
 
