@@ -622,7 +622,7 @@ impl Vm {
                         let func = &*func.borrow();
                         match &func.body {
                             FunctionBody::Code(code) => {
-                                for _ in 0..func.arity.saturating_sub(*arg_count) {
+                                for _ in 1..func.arity.saturating_sub(*arg_count) {
                                     self.stack.push(JsValue::Undefined);
                                 }
                                 self.frames.push(CallFrame {
@@ -634,7 +634,7 @@ impl Vm {
                             FunctionBody::Native(native_func) => {
                                 let mut args =
                                     Vec::from(&self.stack[base + 1..base + 1 + *arg_count]);
-                                for _ in 0..func.arity.saturating_sub(*arg_count) {
+                                for _ in 1..func.arity.saturating_sub(*arg_count) {
                                     args.push(JsValue::Undefined);
                                 }
                                 self.stack.truncate(base);
