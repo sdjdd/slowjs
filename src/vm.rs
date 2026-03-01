@@ -315,7 +315,7 @@ pub enum OpCode {
 
     NewObject,
 
-    /// Set object property by string constant id, keep value on stack.
+    /// Set object property by string constant id, keep object on stack.
     ///
     /// Stack: `[object, value]` -> `[object]`
     InitProperty(usize),
