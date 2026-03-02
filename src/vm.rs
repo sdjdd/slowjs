@@ -428,6 +428,9 @@ impl Vm {
         global_obj
             .borrow_mut()
             .set("window".to_string(), JsValue::Object(global_obj.clone()));
+        global_obj
+            .borrow_mut()
+            .set("undefined".to_string(), JsValue::Undefined);
 
         Self {
             stack: Vec::new(),
