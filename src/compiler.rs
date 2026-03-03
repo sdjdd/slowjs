@@ -5,7 +5,8 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::vm::{CodeBlock, Constant, ConstantPool, FunctionTemplate, OpCode};
+use crate::runtime::CodeBlock;
+use crate::vm::{Constant, ConstantPool, FunctionTemplate, OpCode};
 
 #[derive(Debug, Error)]
 pub enum CompilerError {

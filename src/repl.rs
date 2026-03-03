@@ -1,17 +1,11 @@
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 use slowjs::compiler::Compiler;
+use slowjs::js_std::console;
 use slowjs::lexer::{Lexer, TokenKind};
 use slowjs::parser::{ParseError, parse};
-use slowjs::vm::{JsValue, Vm};
-
-/// Format a JsValue for REPL output (strings with quotes)
-fn format_value(value: &JsValue) -> String {
-    match value {
-        JsValue::String(s) => format!("'{}'", s),
-        _ => value.to_string(),
-    }
-}
+use slowjs::runtime::JsValue;
+use slowjs::vm::Vm;
 
 enum ReplError {
     ImcompleteInput,
@@ -48,9 +42,15 @@ pub fn run() {
                 input_buffer.push_str(input);
 
                 match process_input(&input_buffer, &mut lexer, &mut compiler, &mut vm) {
-                    Ok(value) => {
-                        println!("{}", format_value(&value));
-                    }
+                    Ok(value) => match value {
+                        JsValue::String(s) => {
+                            println!("'{s}'");
+                        }
+                        _ => {
+                            console::print(&vm.heap, &value);
+                            println!();
+                        }
+                    },
                     Err(ReplError::ImcompleteInput) => {
                         input_buffer.push('\n');
                         continue;
