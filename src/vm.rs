@@ -4,7 +4,9 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::js_std;
-use crate::runtime::{CodeBlock, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx};
+use crate::runtime::{
+    CodeBlock, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx, PropertyDescriptor,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Constant {
@@ -277,7 +279,15 @@ impl Vm {
             "window".to_string(),
             JsValue::Object(global_obj_ref.clone()),
         );
-        global_obj.set("undefined".to_string(), JsValue::Undefined);
+        global_obj.properties.insert(
+            "undefined".to_string(),
+            PropertyDescriptor {
+                value: JsValue::Undefined,
+                enumerable: false,
+                writable: false,
+                configurable: false,
+            },
+        );
 
         Self {
             stack: Vec::new(),
@@ -466,6 +476,9 @@ impl Vm {
                         _ => unreachable!(),
                     };
                     let global_obj = self.heap.get_object(&self.global_obj);
+                    if !global_obj.properties.contains_key(&name_str) {
+                        return Err(RuntimeError::ReferenceError(name_str.clone()));
+                    }
                     let value = global_obj.get(&name_str);
                     self.stack.push(value);
                 }

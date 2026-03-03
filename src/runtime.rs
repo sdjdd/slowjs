@@ -22,11 +22,11 @@ pub enum JsValue {
 #[derive(Clone)]
 pub struct JsObject {
     pub prototype: Option<Gc<JsObject>>,
-    pub properties: HashMap<String, PropertyAttributes>,
+    pub properties: HashMap<String, PropertyDescriptor>,
 }
 
 #[derive(Clone)]
-pub struct PropertyAttributes {
+pub struct PropertyDescriptor {
     pub value: JsValue,
     pub writable: bool,
     pub enumerable: bool,
@@ -86,7 +86,7 @@ impl JsValue {
     }
 }
 
-impl Default for PropertyAttributes {
+impl Default for PropertyDescriptor {
     fn default() -> Self {
         Self {
             value: JsValue::Undefined,
@@ -108,9 +108,11 @@ impl JsObject {
     pub fn set(&mut self, k: String, value: JsValue) {
         self.properties.insert(
             k,
-            PropertyAttributes {
+            PropertyDescriptor {
                 value,
-                ..Default::default()
+                writable: true,
+                enumerable: true,
+                configurable: true,
             },
         );
     }

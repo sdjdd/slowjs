@@ -64,6 +64,9 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
 
     println!("{{");
     for (k, v) in &obj.properties {
+        if !v.enumerable {
+            continue;
+        }
         for _ in 0..depth {
             print!("  ");
         }
