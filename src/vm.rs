@@ -86,6 +86,12 @@ pub enum OpCode {
     Greater,
     GreaterEq,
 
+    // Logical
+    LogicalNot,
+
+    Dup,
+    Pop,
+
     Halt,
 
     PushConstant(usize),
@@ -104,6 +110,8 @@ pub enum OpCode {
 
     /// Jump to instruction at index
     Jump(usize),
+    /// Jump if top of stack is truthy
+    JumpIfTrue(usize),
     /// Jump if top of stack is falsy
     JumpIfFalse(usize),
 
@@ -423,6 +431,8 @@ impl Vm {
 
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
         while let Some(frame) = self.frames.last_mut() {
+            // eprintln!("{:?}", self.stack);
+
             if frame.ip >= frame.code.code.len() {
                 self.stack.truncate(frame.base);
                 self.stack.push(JsValue::Undefined);
@@ -499,6 +509,18 @@ impl Vm {
                     let (left, right) = self.pop_binary();
                     let result = is_greater_than_or_equal(&left, &right);
                     self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::LogicalNot => {
+                    let value = self.stack.pop().expect("stack underflow in LogicalNot");
+                    let result = !value.to_bool();
+                    self.stack.push(JsValue::Boolean(result));
+                }
+                OpCode::Dup => {
+                    let value = self.stack.last().expect("stack underflow in Dup");
+                    self.stack.push(value.clone());
+                }
+                OpCode::Pop => {
+                    self.stack.pop().expect("stack underflow in Pop");
                 }
                 OpCode::Halt => {
                     break;
@@ -637,6 +659,12 @@ impl Vm {
                 }
                 OpCode::Jump(addr) => {
                     frame.ip = *addr;
+                }
+                OpCode::JumpIfTrue(addr) => {
+                    let value = self.stack.pop().unwrap();
+                    if value.to_bool() {
+                        frame.ip = *addr;
+                    }
                 }
                 OpCode::JumpIfFalse(addr) => {
                     let value = self.stack.pop().unwrap();

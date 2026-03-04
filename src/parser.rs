@@ -119,7 +119,7 @@ impl Parser {
         Ok(Program { body })
     }
 
-    fn parse_program_body_item(&mut self) -> Result<StatementOrDirective, ParseError> {
+    fn parse_program_body_item(&mut self) -> Result<ProgramBodyItem, ParseError> {
         // Check directive
         if let TokenKind::StringLit(s) = self.current() {
             let loc = self.tokens.get(self.pos).map(|t| t.loc);
@@ -128,7 +128,7 @@ impl Parser {
             self.advance();
             if let TokenKind::Semi = self.current() {
                 self.advance();
-                return Ok(StatementOrDirective::Directive(Directive {
+                return Ok(ProgramBodyItem::Directive(Directive {
                     expression: Literal::new(LiteralValue::String(s.clone()), loc),
                     directive: s,
                 }));
@@ -137,7 +137,7 @@ impl Parser {
         }
 
         let stmt = self.parse_statement()?;
-        Ok(StatementOrDirective::Statement(stmt))
+        Ok(ProgramBodyItem::Statement(stmt))
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
@@ -261,7 +261,7 @@ impl Parser {
     }
 
     fn parse_assignment_expression(&mut self) -> Result<Expression, ParseError> {
-        let left = self.parse_call_expression()?;
+        let left = self.parse_logical_or_expression()?;
 
         let operator = match self.current() {
             TokenKind::Assign => AssignmentOperator::Assign,
@@ -294,10 +294,74 @@ impl Parser {
         }))
     }
 
-    fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
-        let mut expr = self.parse_equality_expression()?;
+    fn parse_logical_or_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_logical_and_expression()?;
 
-        // handle chained call
+        loop {
+            if !matches!(self.current(), TokenKind::LogicalOr) {
+                break;
+            }
+            self.advance();
+            let right = self.parse_logical_and_expression()?;
+            let loc = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::LogicalExpression(LogicalExpression {
+                operator: LogicalOperator::Or,
+                left: Box::new(left),
+                right: Box::new(right),
+                loc: Some(loc),
+            });
+        }
+
+        Ok(left)
+    }
+
+    fn parse_logical_and_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_equality_expression()?;
+
+        loop {
+            if !matches!(self.current(), TokenKind::LogicalAnd) {
+                break;
+            }
+            self.advance();
+            let right = self.parse_equality_expression()?;
+            let loc = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::LogicalExpression(LogicalExpression {
+                operator: LogicalOperator::And,
+                left: Box::new(left),
+                right: Box::new(right),
+                loc: Some(loc),
+            });
+        }
+
+        Ok(left)
+    }
+
+    fn parse_unary_expression(&mut self) -> Result<Expression, ParseError> {
+        if matches!(self.current(), TokenKind::Bang) {
+            let loc = self.current_loc();
+            self.advance();
+            let argument = self.parse_unary_expression()?;
+            Ok(Expression::UnaryExpression(UnaryExpression {
+                operator: UnaryOperator::Not,
+                argument: Box::new(argument),
+                prefix: true,
+                loc: Some(loc),
+            }))
+        } else {
+            self.parse_call_expression()
+        }
+    }
+
+    fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut expr = self.parse_member_expression()?;
+
+        // handle chained calls
         loop {
             if matches!(self.current(), TokenKind::LParen) {
                 expr = self.parse_call(expr)?;
@@ -307,6 +371,26 @@ impl Parser {
         }
 
         Ok(expr)
+    }
+
+    fn parse_call(&mut self, callee: Expression) -> Result<Expression, ParseError> {
+        let start_pos = self.current_loc().start;
+        self.expect(TokenKind::LParen)?;
+
+        let args = self.parse_arguments()?;
+
+        let end_pos = self.current_loc().end;
+        self.expect(TokenKind::RParen)?;
+
+        Ok(Expression::CallExpression(CallExpression {
+            callee: Box::new(callee),
+            arguments: args,
+            loc: Some(SourceLocation::new(start_pos, end_pos)),
+        }))
+    }
+
+    fn parse_arguments(&mut self) -> Result<Vec<Expression>, ParseError> {
+        self.parse_comma_separated_list(|p| p.parse_expression(), TokenKind::RParen)
     }
 
     fn parse_member_expression(&mut self) -> Result<Expression, ParseError> {
@@ -348,24 +432,21 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_call(&mut self, callee: Expression) -> Result<Expression, ParseError> {
-        let start_pos = self.current_loc().start;
-        self.expect(TokenKind::LParen)?;
+    fn parse_multiplicative_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut left = self.parse_unary_expression()?;
 
-        let args = self.parse_arguments()?;
+        loop {
+            let op = match self.current() {
+                TokenKind::Star => BinaryOperator::Multiply,
+                TokenKind::Slash => BinaryOperator::Divide,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_unary_expression()?;
+            left = Expression::new_binary(op, left, right);
+        }
 
-        let end_pos = self.current_loc().end;
-        self.expect(TokenKind::RParen)?;
-
-        Ok(Expression::CallExpression(CallExpression {
-            callee: Box::new(callee),
-            arguments: args,
-            loc: Some(SourceLocation::new(start_pos, end_pos)),
-        }))
-    }
-
-    fn parse_arguments(&mut self) -> Result<Vec<Expression>, ParseError> {
-        self.parse_comma_separated_list(|p| p.parse_expression(), TokenKind::RParen)
+        Ok(left)
     }
 
     fn parse_additive_expression(&mut self) -> Result<Expression, ParseError> {
@@ -415,23 +496,6 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_relational_expression()?;
-            left = Expression::new_binary(op, left, right);
-        }
-
-        Ok(left)
-    }
-
-    fn parse_multiplicative_expression(&mut self) -> Result<Expression, ParseError> {
-        let mut left = self.parse_member_expression()?;
-
-        loop {
-            let op = match self.current() {
-                TokenKind::Star => BinaryOperator::Multiply,
-                TokenKind::Slash => BinaryOperator::Divide,
-                _ => break,
-            };
-            self.advance();
-            let right = self.parse_member_expression()?;
             left = Expression::new_binary(op, left, right);
         }
 
@@ -671,11 +735,32 @@ impl Parser {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::RBrace) {
-            let stmt = self.parse_program_body_item()?;
+            let stmt = self.parse_function_body_item()?;
             body.push(stmt);
         }
 
         Ok(body)
+    }
+
+    fn parse_function_body_item(&mut self) -> Result<FunctionBodyItem, ParseError> {
+        // Check directive
+        if let TokenKind::StringLit(s) = self.current() {
+            let loc = self.tokens.get(self.pos).map(|t| t.loc);
+            let s = s.clone();
+            let pos_before = self.pos;
+            self.advance();
+            if let TokenKind::Semi = self.current() {
+                self.advance();
+                return Ok(FunctionBodyItem::Directive(Directive {
+                    expression: Literal::new(LiteralValue::String(s.clone()), loc),
+                    directive: s,
+                }));
+            }
+            self.pos = pos_before;
+        }
+
+        let stmt = self.parse_statement()?;
+        Ok(FunctionBodyItem::Statement(stmt))
     }
 
     fn parse_return_statement(&mut self) -> Result<ReturnStatement, ParseError> {

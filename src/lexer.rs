@@ -47,6 +47,11 @@ pub enum TokenKind {
     Greater,   // >
     GreaterEq, // >=
 
+    // Logical
+    Bang,       // !
+    LogicalAnd, // &&
+    LogicalOr,  // ||
+
     Semi,     // ;
     LBrace,   // {
     RBrace,   // }
@@ -183,6 +188,7 @@ impl Lexer {
             '.' => (&input[1..], TokenKind::Dot),
             '[' => (&input[1..], TokenKind::LBracket),
             ']' => (&input[1..], TokenKind::RBracket),
+            '!' => (&input[1..], TokenKind::Bang),
             c => return Err(LexerError(c.to_string())),
         };
         self.pos.column += 1;
@@ -203,8 +209,12 @@ impl Lexer {
         let mul_assign = value(TokenKind::StarAssign, tag("*="));
         let div_assign = value(TokenKind::SlashAssign, tag("/="));
 
+        // Logical
+        let and = value(TokenKind::LogicalAnd, tag("&&"));
+        let or = value(TokenKind::LogicalOr, tag("||"));
+
         let parse = alt((
-            eq, neq, le, ge, add_assign, sub_assign, mul_assign, div_assign,
+            eq, neq, le, ge, add_assign, sub_assign, mul_assign, div_assign, and, or,
         ));
 
         map(parse, |kind| {

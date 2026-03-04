@@ -1,16 +1,4 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Position {
-    pub line: usize,
-    pub column: usize,
-}
-
-impl Position {
-    pub fn new(line: usize, column: usize) -> Self {
-        Self { line, column }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SourceLocation {
     pub start: Position,
     pub end: Position,
@@ -22,15 +10,66 @@ impl SourceLocation {
     }
 }
 
-#[derive(Debug)]
-pub struct Program {
-    pub body: ProgramBody,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl Position {
+    pub fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum StatementOrDirective {
+pub struct Identifier {
+    pub name: String,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Literal {
+    pub value: LiteralValue,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LiteralValue {
+    Null,
+    Boolean(bool),
+    Number(f64),
+    String(String),
+}
+
+impl std::fmt::Display for LiteralValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LiteralValue::Null => write!(f, "null"),
+            LiteralValue::Boolean(b) => write!(f, "{}", b),
+            LiteralValue::Number(n) => write!(f, "{}", n),
+            LiteralValue::String(s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl Literal {
+    pub fn new(value: LiteralValue, loc: Option<SourceLocation>) -> Self {
+        Self { value, loc }
+    }
+}
+
+#[derive(Debug)]
+pub enum ProgramBodyItem {
     Statement(Statement),
     Directive(Directive),
+}
+
+pub type ProgramBody = Vec<ProgramBodyItem>;
+
+#[derive(Debug)]
+pub struct Program {
+    pub body: ProgramBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,10 +119,6 @@ pub enum VariableDeclarationKind {
     Var,
 }
 
-pub type ProgramBody = Vec<StatementOrDirective>;
-
-pub type FunctionBody = Vec<StatementOrDirective>;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockStatement {
     pub body: Vec<Statement>,
@@ -100,6 +135,8 @@ pub enum Expression {
     CallExpression(CallExpression),
     AssignmentExpression(AssignmentExpression),
     MemberExpression(MemberExpression),
+    UnaryExpression(UnaryExpression),
+    LogicalExpression(LogicalExpression),
 }
 
 impl Expression {
@@ -113,6 +150,8 @@ impl Expression {
             Expression::CallExpression(call) => call.loc,
             Expression::AssignmentExpression(assignment) => assignment.loc,
             Expression::MemberExpression(member) => member.loc,
+            Expression::UnaryExpression(unary) => unary.loc,
+            Expression::LogicalExpression(logical) => logical.loc,
         }
     }
 
@@ -162,43 +201,6 @@ pub struct BinaryExpression {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LiteralValue {
-    Null,
-    Boolean(bool),
-    Number(f64),
-    String(String),
-}
-
-impl std::fmt::Display for LiteralValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LiteralValue::Null => write!(f, "null"),
-            LiteralValue::Boolean(b) => write!(f, "{}", b),
-            LiteralValue::Number(n) => write!(f, "{}", n),
-            LiteralValue::String(s) => write!(f, "{}", s),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Literal {
-    pub value: LiteralValue,
-    pub loc: Option<SourceLocation>,
-}
-
-impl Literal {
-    pub fn new(value: LiteralValue, loc: Option<SourceLocation>) -> Self {
-        Self { value, loc }
-    }
-}
-
-impl std::fmt::Display for Literal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     Add,      // +
     Subtract, // -
@@ -215,12 +217,6 @@ pub enum BinaryOperator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Identifier {
-    pub name: String,
-    pub loc: Option<SourceLocation>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct IfStatement {
     pub test: Box<Expression>,
     pub consequent: Box<Statement>,
@@ -229,10 +225,18 @@ pub struct IfStatement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum FunctionBodyItem {
+    Statement(Statement),
+    Directive(Directive),
+}
+
+pub type FunctionBody = Vec<FunctionBodyItem>;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDeclaration {
     pub id: Identifier,
     pub params: Vec<Pattern>,
-    pub body: Vec<StatementOrDirective>,
+    pub body: FunctionBody,
     pub loc: Option<SourceLocation>,
 }
 
@@ -240,7 +244,7 @@ pub struct FunctionDeclaration {
 pub struct FunctionExpression {
     pub id: Option<Identifier>,
     pub params: Vec<Pattern>,
-    pub body: Vec<StatementOrDirective>,
+    pub body: FunctionBody,
     pub loc: Option<SourceLocation>,
 }
 
@@ -302,4 +306,31 @@ pub struct MemberExpression {
     pub property: Box<Expression>,
     pub computed: bool,
     pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnaryExpression {
+    pub operator: UnaryOperator,
+    pub argument: Box<Expression>,
+    pub prefix: bool,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOperator {
+    Not, // !
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LogicalExpression {
+    pub operator: LogicalOperator,
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOperator {
+    And, // &&
+    Or,  // ||
 }

@@ -45,7 +45,30 @@ impl Compiler {
     pub fn compile(&mut self, program: &Program) -> Result<CompileResult, CompilerError> {
         self.bytecode.clear();
 
-        let rest_stmts = self.compile_hoisted_statements(&program.body)?;
+        let mut rest_stmts = Vec::new();
+
+        for item in &program.body {
+            match item {
+                ProgramBodyItem::Statement(stmt) => {
+                    self.handle_directives = false;
+                    match stmt {
+                        Statement::Declaration(decl) => match decl {
+                            Declaration::FunctionDeclaration(decl) => {
+                                self.compile_function_declaration(decl)?;
+                            }
+                            Declaration::VariableDeclaration(decl) => {
+                                self.compile_variable_declaration(decl)?;
+                                // TODO: omit declaration, emit assignment only
+                                rest_stmts.push(stmt);
+                            }
+                        },
+                        _ => rest_stmts.push(stmt),
+                    }
+                }
+                ProgramBodyItem::Directive(_) => {}
+            }
+        }
+
         for stmt in rest_stmts {
             self.compile_statement(stmt)?;
         }
@@ -150,7 +173,49 @@ impl Compiler {
                 self.compile_assignment_expression(assignment)?
             }
             Expression::MemberExpression(member) => self.compile_member_expression(member)?,
+            Expression::UnaryExpression(unary) => self.compile_unary_expression(unary)?,
+            Expression::LogicalExpression(logical) => self.compile_logical_expression(logical)?,
         }
+        Ok(())
+    }
+
+    fn compile_unary_expression(&mut self, unary: &UnaryExpression) -> Result<(), CompilerError> {
+        self.compile_expression(&unary.argument)?;
+        match unary.operator {
+            UnaryOperator::Not => {
+                self.emit(OpCode::LogicalNot);
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_logical_expression(
+        &mut self,
+        logical: &LogicalExpression,
+    ) -> Result<(), CompilerError> {
+        self.compile_expression(&logical.left)?;
+
+        match logical.operator {
+            LogicalOperator::And => {
+                self.emit(OpCode::Dup);
+                let jump_to_end_offset = self.bytecode.len();
+                self.emit(OpCode::JumpIfFalse(0));
+                self.emit(OpCode::Pop);
+                self.compile_expression(&logical.right)?;
+                let end_addr = self.bytecode.len();
+                self.bytecode[jump_to_end_offset] = OpCode::JumpIfFalse(end_addr);
+            }
+            LogicalOperator::Or => {
+                self.emit(OpCode::Dup);
+                let jump_to_end_offset = self.bytecode.len();
+                self.emit(OpCode::JumpIfTrue(0));
+                self.emit(OpCode::Pop);
+                self.compile_expression(&logical.right)?;
+                let end_addr = self.bytecode.len();
+                self.bytecode[jump_to_end_offset] = OpCode::JumpIfTrue(end_addr);
+            }
+        }
+
         Ok(())
     }
 
@@ -165,7 +230,7 @@ impl Compiler {
 
         for property in &obj.properties {
             let key = match &property.key {
-                PropertyKey::Literal(lit) => Constant::String(lit.to_string()),
+                PropertyKey::Literal(lit) => Constant::String(lit.value.to_string()),
                 PropertyKey::Identifier(id) => Constant::String(id.name.clone()),
             };
             let key_index = self.add_constant(key);
@@ -348,7 +413,30 @@ impl Compiler {
             self.emit(OpCode::DeclareVar(name_index));
         }
 
-        let rest_stmts = compiler.compile_hoisted_statements(&func.body)?;
+        let mut rest_stmts = Vec::new();
+
+        for item in &func.body {
+            match item {
+                FunctionBodyItem::Statement(stmt) => {
+                    self.handle_directives = false;
+                    match stmt {
+                        Statement::Declaration(decl) => match decl {
+                            Declaration::FunctionDeclaration(decl) => {
+                                self.compile_function_declaration(decl)?;
+                            }
+                            Declaration::VariableDeclaration(decl) => {
+                                self.compile_variable_declaration(decl)?;
+                                // TODO: omit declaration, emit assignment only
+                                rest_stmts.push(stmt);
+                            }
+                        },
+                        _ => rest_stmts.push(stmt),
+                    }
+                }
+                FunctionBodyItem::Directive(_) => {}
+            }
+        }
+
         for stmt in &rest_stmts {
             compiler.compile_statement(stmt)?;
         }
@@ -395,44 +483,6 @@ impl Compiler {
         }
         self.emit(OpCode::Return);
         Ok(())
-    }
-
-    fn compile_hoisted_statements<'a>(
-        &mut self,
-        body: &'a [StatementOrDirective],
-    ) -> Result<Vec<&'a Statement>, CompilerError> {
-        let mut rest_stmts = Vec::new();
-
-        // Hoist [function | var] declarations
-        for item in body {
-            match item {
-                StatementOrDirective::Statement(stmt) => {
-                    self.handle_directives = false;
-                    match stmt {
-                        Statement::Declaration(decl) => match decl {
-                            Declaration::FunctionDeclaration(decl) => {
-                                self.compile_function_declaration(decl)?;
-                            }
-                            Declaration::VariableDeclaration(decl) => {
-                                self.compile_variable_declaration(decl)?;
-                                // TODO: omit declaration, emit assignment only
-                                rest_stmts.push(stmt);
-                            }
-                        },
-                        _ => rest_stmts.push(stmt),
-                    }
-                }
-                StatementOrDirective::Directive(d) => {
-                    if self.handle_directives {
-                        // TODO
-                        continue;
-                    }
-                    self.compile_literal(&d.expression)?;
-                }
-            }
-        }
-
-        Ok(rest_stmts)
     }
 }
 

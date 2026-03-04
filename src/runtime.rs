@@ -19,6 +19,20 @@ pub enum JsValue {
     Function(Gc<JsFunction>),
 }
 
+impl std::fmt::Debug for JsValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JsValue::Null => write!(f, "null"),
+            JsValue::Undefined => write!(f, "undefined"),
+            JsValue::Boolean(b) => write!(f, "{}", b),
+            JsValue::Number(n) => write!(f, "{}", n),
+            JsValue::String(s) => write!(f, "'{}'", s),
+            JsValue::Object(_) => write!(f, "object"),
+            JsValue::Function(_) => write!(f, "function"),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct JsObject {
     pub prototype: Option<Gc<JsObject>>,
