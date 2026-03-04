@@ -1,129 +1,30 @@
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::runtime::CodeBlock;
+use crate::runtime::{CodeBlock, ConstantTable};
 use crate::vm::{Constant, ConstantPool, FunctionTemplate, OpCode};
 
 #[derive(Debug, Error)]
-pub enum CompilerError {
-    #[error("{0} is not defined")]
-    ReferenceError(String),
-}
-
-#[derive(Debug)]
-struct Scope {
-    variables: HashMap<String, usize>,
-    next_slot: usize,
-    lexical: bool,
-}
-
-impl Scope {
-    fn new(lexical: bool, start: usize) -> Self {
-        Self {
-            lexical,
-            next_slot: start,
-            variables: HashMap::new(),
-        }
-    }
-}
-
-enum Variable {
-    Global,
-    Local(usize),
-}
+pub enum CompilerError {}
 
 pub struct Compiler {
     bytecode: Vec<OpCode>,
     constants: ConstantPool,
-    scopes: Vec<Scope>,
 
-    pub handle_directives: bool,
+    handle_directives: bool,
 }
 
 impl Compiler {
     pub fn new() -> Self {
-        let mut compiler = Self {
+        let compiler = Self {
             bytecode: Vec::new(),
             constants: Vec::new(),
-            scopes: Vec::new(),
             handle_directives: true,
         };
 
-        compiler.begin_scope();
-
         compiler
-    }
-
-    fn begin_scope(&mut self) {
-        self.scopes.push(Scope::new(false, 0));
-    }
-
-    fn begin_lexical_scope(&mut self) {
-        let current_scope = self.scopes.last().unwrap();
-        self.scopes.push(Scope::new(true, current_scope.next_slot));
-    }
-
-    fn end_scope(&mut self) -> usize {
-        if self.scopes.len() > 1 {
-            self.scopes.pop().map(|s| s.next_slot).unwrap_or(0)
-        } else {
-            self.scopes.last().map(|s| s.next_slot).unwrap_or(0)
-        }
-    }
-
-    /// Create a `var` binding, no lexical scope
-    fn declare_variable(&mut self, name: &str) -> Variable {
-        let (idx, scope) = 'a: {
-            for (idx, scope) in self.scopes.iter_mut().rev().enumerate() {
-                if scope.lexical {
-                    continue;
-                }
-                break 'a (idx, scope);
-            }
-            unreachable!("scope[0] should be not lexical")
-        };
-
-        let slot = match scope.variables.entry(name.to_string()) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => {
-                let slot = scope.next_slot;
-                scope.next_slot += 1;
-                entry.insert(slot);
-
-                // Update inner lexical scope
-                for scope in self.scopes.iter_mut().skip(idx) {
-                    if scope.lexical {
-                        scope.next_slot += 1;
-                        for slot in scope.variables.values_mut() {
-                            *slot += 1;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                slot
-            }
-        };
-
-        if idx == 0 {
-            Variable::Global
-        } else {
-            Variable::Local(slot)
-        }
-    }
-
-    fn resolve_variable(&self, name: &str) -> Variable {
-        for scope in self.scopes.iter().skip(1).rev() {
-            if let Some(slot) = scope.variables.get(name) {
-                return Variable::Local(*slot);
-            }
-        }
-        Variable::Global
     }
 
     fn add_constant(&mut self, value: Constant) -> usize {
@@ -181,11 +82,9 @@ impl Compiler {
     }
 
     fn compile_block_statement(&mut self, stmt: &BlockStatement) -> Result<(), CompilerError> {
-        self.begin_lexical_scope();
         for stmt in &stmt.body {
             self.compile_statement(stmt)?;
         }
-        self.end_scope();
         Ok(())
     }
 
@@ -222,7 +121,9 @@ impl Compiler {
                 Pattern::Identifier(ident) => &ident.name,
             };
 
-            let var = self.declare_variable(var_name);
+            let name_index = self.add_constant(Constant::String(var_name.clone()));
+            self.emit(OpCode::DeclareVar(name_index));
+
             if let Some(init) = init {
                 if let Expression::FunctionExpression(func) = init {
                     self.compile_function_expression(func, Some(var_name))?;
@@ -230,15 +131,7 @@ impl Compiler {
                     self.compile_expression(init)?;
                 }
 
-                match var {
-                    Variable::Global => {
-                        let name_index = self.add_constant(Constant::String(var_name.clone()));
-                        self.emit(OpCode::SetGlobal(name_index));
-                    }
-                    Variable::Local(slot) => {
-                        self.emit(OpCode::SetLocal(slot));
-                    }
-                }
+                self.emit(OpCode::SetVar(name_index));
             }
         }
 
@@ -262,16 +155,8 @@ impl Compiler {
     }
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
-        let var = self.resolve_variable(&id.name);
-        match var {
-            Variable::Global => {
-                let name_index = self.add_constant(Constant::String(id.name.clone()));
-                self.emit(OpCode::GetGlobal(name_index));
-            }
-            Variable::Local(slot) => {
-                self.emit(OpCode::GetLocal(slot));
-            }
-        }
+        let name_index = self.add_constant(Constant::String(id.name.clone()));
+        self.emit(OpCode::GetVar(name_index));
         Ok(())
     }
 
@@ -365,16 +250,8 @@ impl Compiler {
         match &*assignment.left {
             AssignmentTarget::Pattern(pattern) => match pattern {
                 Pattern::Identifier(id) => {
-                    let var = self.resolve_variable(&id.name);
-                    match var {
-                        Variable::Global => {
-                            let name_index = self.add_constant(Constant::String(id.name.clone()));
-                            self.emit(OpCode::SetGlobal(name_index));
-                        }
-                        Variable::Local(slot) => {
-                            self.emit(OpCode::SetLocal(slot));
-                        }
-                    }
+                    let name_index = self.add_constant(Constant::String(id.name.clone()));
+                    self.emit(OpCode::SetVar(name_index));
                 }
             },
             _ => unreachable!(),
@@ -447,17 +324,10 @@ impl Compiler {
         &mut self,
         func: &FunctionDeclaration,
     ) -> Result<(), CompilerError> {
-        let var = self.declare_variable(&func.id.name);
+        let name_index = self.add_constant(Constant::String(func.id.name.clone()));
+        self.emit(OpCode::DeclareVar(name_index));
         self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
-        match var {
-            Variable::Global => {
-                let name_index = self.add_constant(Constant::String(func.id.name.clone()));
-                self.emit(OpCode::SetGlobal(name_index));
-            }
-            Variable::Local(slot) => {
-                self.emit(OpCode::SetLocal(slot));
-            }
-        }
+        self.emit(OpCode::SetVar(name_index));
         Ok(())
     }
 
@@ -467,13 +337,15 @@ impl Compiler {
         func_name: Option<&String>,
     ) -> Result<(), CompilerError> {
         let mut compiler = Compiler::new();
-        compiler.begin_lexical_scope();
 
+        let mut params = Vec::new();
         for param in &func.params {
             let param_name = match param {
                 Pattern::Identifier(id) => id.name.clone(),
             };
-            compiler.declare_variable(&param_name);
+            params.push(param_name.clone());
+            let name_index = self.add_constant(Constant::String(param_name.clone()));
+            self.emit(OpCode::DeclareVar(name_index));
         }
 
         let rest_stmts = compiler.compile_hoisted_statements(&func.body)?;
@@ -492,10 +364,11 @@ impl Compiler {
 
         let func = FunctionTemplate {
             name: func_name,
+            params,
             arity: func.params.len(),
             code_block: Rc::new(CodeBlock {
                 code: bytecode,
-                constants: compiler.constants,
+                constants: ConstantTable::new(compiler.constants),
             }),
         };
 
@@ -542,6 +415,8 @@ impl Compiler {
                             }
                             Declaration::VariableDeclaration(decl) => {
                                 self.compile_variable_declaration(decl)?;
+                                // TODO: omit declaration, emit assignment only
+                                rest_stmts.push(stmt);
                             }
                         },
                         _ => rest_stmts.push(stmt),
@@ -561,7 +436,6 @@ impl Compiler {
     }
 }
 
-#[derive(Debug)]
 pub struct CompileResult {
     pub bytecode: Vec<OpCode>,
     pub constants: ConstantPool,

@@ -1,6 +1,6 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::vm::{Constant, Heap, OpCode};
+use crate::vm::{Constant, Env, FunctionTemplate, Heap, OpCode};
 
 #[derive(Clone, Copy)]
 pub struct Gc<T> {
@@ -37,8 +37,9 @@ pub struct PropertyDescriptor {
 pub struct JsFunction {
     pub prototype: Gc<JsObject>,
     pub name: String,
-    pub arity: usize,
+    pub params: Vec<String>,
     pub body: FunctionBody,
+    pub env: Option<Rc<RefCell<Env>>>,
 }
 
 #[derive(Clone)]
@@ -47,10 +48,43 @@ pub enum FunctionBody {
     Native(fn(&NativeFnCtx)),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq)]
+pub struct ConstantTable {
+    consts: Vec<Constant>,
+}
+
+impl ConstantTable {
+    pub fn new(consts: Vec<Constant>) -> Self {
+        Self { consts }
+    }
+
+    pub fn get(&self, index: usize) -> JsValue {
+        match self.consts[index] {
+            Constant::Number(n) => JsValue::Number(f64::from_bits(n)),
+            Constant::String(ref s) => JsValue::String(s.clone()),
+            Constant::Function(_) => panic!("constant type mismatch"),
+        }
+    }
+
+    pub fn get_string(&self, index: usize) -> &String {
+        match self.consts[index] {
+            Constant::String(ref s) => s,
+            _ => panic!("constant type mismatch"),
+        }
+    }
+
+    pub fn get_func_tmpl(&self, index: usize) -> &FunctionTemplate {
+        match self.consts[index] {
+            Constant::Function(ref tmpl) => tmpl,
+            _ => panic!("constant type mismatch"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct CodeBlock {
     pub code: Vec<OpCode>,
-    pub constants: Vec<Constant>,
+    pub constants: ConstantTable,
 }
 
 pub struct NativeFnCtx<'a> {

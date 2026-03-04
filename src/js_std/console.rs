@@ -146,9 +146,10 @@ pub fn new_console_object(heap: &mut Heap) -> JsValue {
     let mut console = JsObject::new();
     let log = JsFunction {
         name: "log".to_string(),
-        arity: 0,
+        params: vec![],
         body: FunctionBody::Native(console_log),
         prototype: heap.alloc_object(JsObject::new()),
+        env: None,
     };
     console.set("log".to_string(), JsValue::Function(heap.alloc_func(log)));
     JsValue::Object(heap.alloc_object(console))

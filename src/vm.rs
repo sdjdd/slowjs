@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
@@ -5,10 +7,11 @@ use thiserror::Error;
 
 use crate::js_std;
 use crate::runtime::{
-    CodeBlock, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx, PropertyDescriptor,
+    CodeBlock, ConstantTable, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx,
+    PropertyDescriptor,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Constant {
     Number(u64),
     String(String),
@@ -25,10 +28,11 @@ impl Display for Constant {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FunctionTemplate {
     pub name: String,
     pub arity: usize,
+    pub params: Vec<String>,
     pub code_block: Rc<CodeBlock>,
 }
 
@@ -38,14 +42,16 @@ pub struct CallFrame {
     pub base: usize,
     pub ip: usize,
     pub code: Rc<CodeBlock>,
+    env: Rc<RefCell<Env>>,
 }
 
 impl CallFrame {
-    pub fn new(code: Rc<CodeBlock>) -> Self {
+    pub fn new(code: Rc<CodeBlock>, env: Rc<RefCell<Env>>) -> Self {
         Self {
             base: 0,
             ip: 0,
             code,
+            env,
         }
     }
 }
@@ -87,6 +93,10 @@ pub enum OpCode {
     SetLocal(usize),
     GetGlobal(usize),
     SetGlobal(usize),
+
+    DeclareVar(usize),
+    SetVar(usize),
+    GetVar(usize),
 
     /// Call a function with n arguments
     Call(usize),
@@ -250,6 +260,50 @@ impl Heap {
     }
 }
 
+#[derive(Clone)]
+pub struct Env {
+    bindings: HashMap<String, JsValue>,
+    outer: Option<Rc<RefCell<Env>>>,
+}
+
+impl Env {
+    pub fn new(outer: Option<Rc<RefCell<Env>>>) -> Self {
+        Self {
+            bindings: HashMap::new(),
+            outer,
+        }
+    }
+
+    fn is_root(&self) -> bool {
+        self.outer.is_none()
+    }
+
+    fn declare_var(&mut self, name: String, value: JsValue) {
+        self.bindings.entry(name).or_insert(value);
+    }
+
+    fn set_var(&mut self, name: String, value: JsValue) -> bool {
+        if self.bindings.contains_key(&name) {
+            self.bindings.insert(name, value);
+            return true;
+        }
+        if let Some(outer) = &self.outer {
+            return outer.borrow_mut().set_var(name, value);
+        }
+        return false;
+    }
+
+    fn get_var(&self, name: &str) -> Option<JsValue> {
+        if self.bindings.contains_key(name) {
+            return self.bindings.get(name).cloned();
+        }
+        if let Some(outer) = &self.outer {
+            return outer.borrow().get_var(name);
+        }
+        None
+    }
+}
+
 pub struct Vm {
     stack: Vec<JsValue>,
     frames: Vec<CallFrame>,
@@ -348,13 +402,21 @@ impl Vm {
         bytecode: &[OpCode],
         constants: &ConstantPool,
     ) -> Result<(), RuntimeError> {
+        let env = match self.frames.last() {
+            Some(frame) => frame.env.clone(),
+            None => Rc::new(RefCell::new(Env::new(None))),
+        };
+
         self.stack.clear();
         self.frames.clear();
 
-        self.frames.push(CallFrame::new(Rc::new(CodeBlock {
-            code: bytecode.to_vec(),
-            constants: constants.to_vec(),
-        })));
+        self.frames.push(CallFrame::new(
+            Rc::new(CodeBlock {
+                code: bytecode.to_vec(),
+                constants: ConstantTable::new(constants.clone()),
+            }),
+            env,
+        ));
 
         self.run_loop()
     }
@@ -370,6 +432,8 @@ impl Vm {
 
             let op = &frame.code.code[frame.ip];
             frame.ip += 1;
+
+            // eprintln!("{:?}", op);
 
             match op {
                 OpCode::PushNull => {
@@ -440,20 +504,50 @@ impl Vm {
                     break;
                 }
                 OpCode::PushConstant(index) => {
-                    let constant = &frame.code.constants[*index];
-                    let value = match constant {
-                        Constant::String(s) => JsValue::String(s.clone()),
-                        Constant::Number(n) => JsValue::Number(f64::from_bits(*n)),
-                        Constant::Function(tmpl) => {
-                            let func = JsFunction {
-                                name: tmpl.name.clone(),
-                                arity: tmpl.arity,
-                                body: FunctionBody::Script(tmpl.code_block.clone()),
-                                prototype: self.heap.alloc_object(JsObject::new()),
-                            };
-                            let func = self.heap.alloc_func(func);
-                            JsValue::Function(func)
-                        }
+                    let value = frame.code.constants.get(*index);
+                    self.stack.push(value);
+                }
+                OpCode::DeclareVar(const_idx) => {
+                    let name = frame.code.constants.get_string(*const_idx);
+                    if frame.env.borrow().is_root() {
+                        self.heap
+                            .get_object_mut(&self.global_obj)
+                            .properties
+                            .entry(name.clone())
+                            .or_insert(PropertyDescriptor {
+                                value: JsValue::Undefined,
+                                configurable: true,
+                                writable: true,
+                                enumerable: true,
+                            });
+                    } else {
+                        frame
+                            .env
+                            .borrow_mut()
+                            .declare_var(name.clone(), JsValue::Undefined);
+                    }
+                }
+                OpCode::SetVar(const_idx) => {
+                    let name = frame.code.constants.get_string(*const_idx);
+                    let value = self.stack.last().unwrap();
+                    if frame.env.borrow().is_root() {
+                        self.heap
+                            .get_object_mut(&self.global_obj)
+                            .set(name.clone(), value.clone());
+                    } else {
+                        frame.env.borrow_mut().set_var(name.clone(), value.clone());
+                    }
+                }
+                OpCode::GetVar(const_idx) => {
+                    let name = frame.code.constants.get_string(*const_idx);
+                    let value = if frame.env.borrow().is_root() {
+                        self.heap.get_object(&self.global_obj).get(name)
+                    } else {
+                        frame
+                            .env
+                            .borrow()
+                            .get_var(name)
+                            .unwrap_or(JsValue::Undefined)
                     };
                     self.stack.push(value);
                 }
@@ -470,27 +564,19 @@ impl Vm {
                     self.stack[index] = value;
                 }
                 OpCode::GetGlobal(name_index) => {
-                    let name = &frame.code.constants[*name_index];
-                    let name_str = match name {
-                        Constant::String(s) => s.clone(),
-                        _ => unreachable!(),
-                    };
+                    let name = frame.code.constants.get_string(*name_index);
                     let global_obj = self.heap.get_object(&self.global_obj);
-                    if !global_obj.properties.contains_key(&name_str) {
-                        return Err(RuntimeError::ReferenceError(name_str.clone()));
+                    if !global_obj.properties.contains_key(name) {
+                        return Err(RuntimeError::ReferenceError(name.clone()));
                     }
-                    let value = global_obj.get(&name_str);
+                    let value = global_obj.get(&name);
                     self.stack.push(value);
                 }
                 OpCode::SetGlobal(name_index) => {
                     let value = self.stack.last().unwrap();
-                    let name = &frame.code.constants[*name_index];
-                    let name_str = match name {
-                        Constant::String(s) => s.clone(),
-                        _ => unreachable!(),
-                    };
+                    let name = frame.code.constants.get_string(*name_index);
                     let global_obj = self.heap.get_object_mut(&self.global_obj);
-                    global_obj.set(name_str, value.clone());
+                    global_obj.set(name.clone(), value.clone());
                 }
                 OpCode::Call(arg_count) => {
                     // Stack: [func, arg1, arg2, ...] <- top
@@ -501,19 +587,28 @@ impl Vm {
                         let func = self.heap.get_func(func);
                         match &func.body {
                             FunctionBody::Script(code) => {
-                                for _ in *arg_count..func.arity {
+                                for _ in *arg_count..func.params.len() {
                                     self.stack.push(JsValue::Undefined);
+                                }
+                                let env =
+                                    Rc::new(RefCell::new(Env::new(func.env.as_ref().cloned())));
+                                for (i, param) in func.params.iter().enumerate() {
+                                    env.borrow_mut().declare_var(
+                                        param.clone(),
+                                        self.stack[base + i + 1].clone(),
+                                    );
                                 }
                                 self.frames.push(CallFrame {
                                     base,
                                     ip: 0,
                                     code: code.clone(),
+                                    env,
                                 });
                             }
                             FunctionBody::Native(native_func) => {
                                 let mut args =
                                     Vec::from(&self.stack[base + 1..base + 1 + *arg_count]);
-                                for _ in *arg_count..func.arity {
+                                for _ in *arg_count..func.params.len() {
                                     args.push(JsValue::Undefined);
                                 }
                                 self.stack.truncate(base);
@@ -537,8 +632,8 @@ impl Vm {
                 OpCode::Return => {
                     let value = self.stack.pop().unwrap();
                     self.stack.truncate(frame.base);
-                    self.frames.pop();
                     self.stack.push(value);
+                    self.frames.pop();
                 }
                 OpCode::Jump(addr) => {
                     frame.ip = *addr;
@@ -557,7 +652,7 @@ impl Vm {
                 OpCode::InitProperty(const_id) => {
                     let value = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap();
-                    let key = &frame.code.constants[*const_id];
+                    let key = frame.code.constants.get_string(*const_id);
                     let obj_ref = match obj {
                         JsValue::Object(obj) => obj,
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
@@ -569,19 +664,14 @@ impl Vm {
                 OpCode::SetProperty(key_index) => {
                     let value = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap();
-                    let key = &frame.code.constants[*key_index];
+                    let key = frame.code.constants.get_string(*key_index);
 
                     let obj = match obj {
                         JsValue::Object(obj) => self.heap.get_object_mut(&obj),
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
                     };
 
-                    let key = match key {
-                        Constant::String(s) => s.clone(),
-                        _ => unreachable!(),
-                    };
-
-                    obj.set(key, value);
+                    obj.set(key.clone(), value);
                 }
                 OpCode::GetProperty(key_index) => {
                     let obj = match self.stack.pop().unwrap() {
@@ -589,10 +679,7 @@ impl Vm {
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
                     };
 
-                    let key = match &frame.code.constants[*key_index] {
-                        Constant::String(s) => s,
-                        _ => unreachable!(),
-                    };
+                    let key = frame.code.constants.get_string(*key_index);
 
                     self.stack.push(obj.get(key));
                 }
@@ -628,15 +715,13 @@ impl Vm {
                     obj.set(key, value);
                 }
                 OpCode::NewFunc(index) => {
-                    let tmpl = match &frame.code.constants[*index] {
-                        Constant::Function(func) => func,
-                        _ => unreachable!(),
-                    };
+                    let tmpl = frame.code.constants.get_func_tmpl(*index);
                     let func = JsFunction {
                         name: tmpl.name.clone(),
-                        arity: tmpl.arity,
+                        params: tmpl.params.clone(),
                         body: FunctionBody::Script(tmpl.code_block.clone()),
                         prototype: self.heap.alloc_object(JsObject::new()),
+                        env: Some(frame.env.clone()),
                     };
                     let func = self.heap.alloc_func(func);
                     let value = JsValue::Function(func);
