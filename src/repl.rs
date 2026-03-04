@@ -3,7 +3,7 @@ use rustyline::{DefaultEditor, error::ReadlineError};
 use slowjs::compiler::Compiler;
 use slowjs::js_std::console;
 use slowjs::lexer::{Lexer, TokenKind};
-use slowjs::parser::{ParseError, parse};
+use slowjs::parser::{ParseError, Parser};
 use slowjs::runtime::JsValue;
 use slowjs::vm::Vm;
 
@@ -77,6 +77,16 @@ pub fn run() {
     }
 }
 
+fn map_parse_error(e: ParseError) -> ReplError {
+    match e {
+        ParseError::UnexpectedToken {
+            found: TokenKind::Eof,
+            ..
+        } => ReplError::ImcompleteInput,
+        e => ReplError::Other(e.to_string()),
+    }
+}
+
 fn process_input(
     input: &str,
     lexer: &mut Lexer,
@@ -87,15 +97,23 @@ fn process_input(
         .tokenize(input)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 
-    let program = parse(tokens).map_err(|e| match e {
-        ParseError::UnexpectedToken {
-            found: TokenKind::Eof,
-            ..
-        } => ReplError::ImcompleteInput,
-        e => ReplError::Other(e.to_string()),
-    })?;
+    let mut parser = Parser::new(tokens);
 
-    let result = compiler.compile(&program).unwrap();
+    let result = {
+        // Try to parse expression
+        if let Ok(expr) = parser.parse_expression()
+            && parser.is_complete()
+        {
+            compiler.reset();
+            compiler.compile_expression(&expr).unwrap();
+            compiler.get_result()
+        } else {
+            // Fallback to statements
+            parser.reset();
+            let program = parser.parse_program().map_err(map_parse_error)?;
+            compiler.compile(&program).unwrap()
+        }
+    };
 
     vm.run_script(&result.bytecode, &result.constants)
         .map_err(|e| ReplError::Other(e.to_string()))?;

@@ -24,6 +24,14 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
+    pub fn reset(&mut self) {
+        self.pos = 0;
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.pos >= self.tokens.len() || self.current() == &TokenKind::Eof
+    }
+
     fn current(&self) -> &TokenKind {
         self.tokens
             .get(self.pos)
@@ -108,7 +116,7 @@ impl Parser {
         }
     }
 
-    fn parse_program(&mut self) -> Result<Program, ParseError> {
+    pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
 
         while !matches!(self.current(), TokenKind::Eof) {
@@ -256,7 +264,7 @@ impl Parser {
         }))
     }
 
-    fn parse_expression(&mut self) -> Result<Expression, ParseError> {
+    pub fn parse_expression(&mut self) -> Result<Expression, ParseError> {
         self.parse_assignment_expression()
     }
 
@@ -784,11 +792,6 @@ impl Parser {
             loc: Some(loc),
         })
     }
-}
-
-pub fn parse(tokens: Vec<Token>) -> Result<Program, ParseError> {
-    let mut parser = Parser::new(tokens);
-    parser.parse_program()
 }
 
 #[cfg(test)]

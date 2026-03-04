@@ -27,6 +27,10 @@ impl Compiler {
         compiler
     }
 
+    pub fn reset(&mut self) {
+        self.constants.clear();
+    }
+
     fn add_constant(&mut self, value: Constant) -> usize {
         for (i, existing) in self.constants.iter().enumerate() {
             if *existing == value {
@@ -40,6 +44,19 @@ impl Compiler {
 
     fn emit(&mut self, op: OpCode) {
         self.bytecode.push(op);
+    }
+
+    pub fn get_result(&mut self) -> CompileResult {
+        if let Some(op) = self.bytecode.last()
+            && *op != OpCode::Halt
+        {
+            self.bytecode.push(OpCode::Halt);
+        }
+
+        CompileResult {
+            bytecode: self.bytecode.clone(),
+            constants: self.constants.clone(),
+        }
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<CompileResult, CompilerError> {
@@ -73,14 +90,7 @@ impl Compiler {
             self.compile_statement(stmt)?;
         }
 
-        self.bytecode.push(OpCode::Halt);
-
-        let result = CompileResult {
-            bytecode: self.bytecode.clone(),
-            constants: self.constants.clone(),
-        };
-
-        Ok(result)
+        Ok(self.get_result())
     }
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), CompilerError> {
@@ -161,7 +171,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_expression(&mut self, expr: &Expression) -> Result<(), CompilerError> {
+    pub fn compile_expression(&mut self, expr: &Expression) -> Result<(), CompilerError> {
         match expr {
             Expression::Literal(literal) => self.compile_literal(literal)?,
             Expression::BinaryExpression(bin_expr) => self.compile_binary_expression(bin_expr)?,

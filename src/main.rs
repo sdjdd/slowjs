@@ -6,7 +6,7 @@ use std::io::{self, IsTerminal, Read};
 
 use slowjs::compiler::Compiler;
 use slowjs::lexer::Lexer;
-use slowjs::parser::parse;
+use slowjs::parser::Parser;
 use slowjs::vm::Vm;
 
 fn main() {
@@ -40,7 +40,9 @@ fn run_script(input: &str) {
 
     let tokens = lexer.tokenize(input).expect("Failed to tokenize input");
 
-    let program = parse(tokens).expect("Failed to parse input");
+    let program = Parser::new(tokens)
+        .parse_program()
+        .expect("Failed to parse input");
 
     let result = compiler
         .compile(&program)
