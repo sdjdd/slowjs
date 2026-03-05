@@ -97,21 +97,33 @@ fn process_input(
         .tokenize(input)
         .map_err(|e| ReplError::Other(e.to_string()))?;
 
+    if tokens.is_empty() {
+        return Ok(JsValue::Undefined);
+    }
+
+    let first_token = tokens[0].kind.clone();
+
     let mut parser = Parser::new(tokens);
 
+    compiler.reset();
+
     let result = {
-        // Try to parse expression
-        if let Ok(expr) = parser.parse_expression()
-            && parser.is_complete()
-        {
-            compiler.reset();
-            compiler.compile_expression(&expr).unwrap();
-            compiler.get_result()
-        } else {
-            // Fallback to statements
-            parser.reset();
+        if matches!(first_token, TokenKind::Var | TokenKind::Function) {
             let program = parser.parse_program().map_err(map_parse_error)?;
             compiler.compile(&program).unwrap()
+        } else {
+            // Try to parse expression
+            if let Ok(expr) = parser.parse_expression()
+                && parser.is_complete()
+            {
+                compiler.compile_expression(&expr).unwrap();
+                compiler.get_result()
+            } else {
+                // Fallback to statements
+                parser.reset();
+                let program = parser.parse_program().map_err(map_parse_error)?;
+                compiler.compile(&program).unwrap()
+            }
         }
     };
 

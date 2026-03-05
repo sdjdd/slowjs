@@ -28,7 +28,7 @@ impl Compiler {
     }
 
     pub fn reset(&mut self) {
-        self.constants.clear();
+        self.bytecode.clear();
     }
 
     fn add_constant(&mut self, value: Constant) -> usize {
