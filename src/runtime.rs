@@ -173,3 +173,36 @@ impl JsObject {
             .unwrap_or(JsValue::Undefined)
     }
 }
+
+pub fn string_to_number(s: &str) -> f64 {
+    let s = s.trim();
+
+    if s.is_empty() {
+        return 0.0;
+    }
+
+    s.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+pub fn to_number(value: &JsValue) -> f64 {
+    match value {
+        JsValue::Number(n) => *n,
+        JsValue::Undefined => f64::NAN,
+        JsValue::Null => 0.0,
+        JsValue::Boolean(b) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        JsValue::String(s) => {
+            if s.is_empty() {
+                0.0
+            } else {
+                s.parse::<f64>().unwrap_or(f64::NAN)
+            }
+        }
+        _ => unimplemented!("to_number"),
+    }
+}

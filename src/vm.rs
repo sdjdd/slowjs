@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::js_std;
 use crate::runtime::{
-    CodeBlock, ConstantTable, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx,
+    self, CodeBlock, ConstantTable, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx,
     PropertyDescriptor,
 };
 
@@ -147,37 +147,13 @@ pub enum OpCode {
 
 // ============ Abstract Operations for Relational Comparison ============
 
-/// ToNumber abstract operation (ECMAScript 7.1.4)
-fn to_number(value: &JsValue) -> f64 {
-    match value {
-        JsValue::Undefined => f64::NAN,
-        JsValue::Null => 0.0,
-        JsValue::Boolean(b) => {
-            if *b {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        JsValue::Number(n) => *n,
-        JsValue::String(s) => {
-            if s.is_empty() {
-                0.0
-            } else {
-                s.parse::<f64>().unwrap_or(f64::NAN)
-            }
-        }
-        JsValue::Object(_) | JsValue::Function(_) => f64::NAN,
-    }
-}
-
 /// Relational comparison helper using ToNumber conversion
 fn relational_cmp<F>(left: &JsValue, right: &JsValue, cmp: F) -> bool
 where
     F: Fn(f64, f64) -> bool,
 {
-    let left_num = to_number(left);
-    let right_num = to_number(right);
+    let left_num = runtime::to_number(left);
+    let right_num = runtime::to_number(right);
 
     // NaN comparisons always return false
     if left_num.is_nan() || right_num.is_nan() {
