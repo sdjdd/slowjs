@@ -185,6 +185,10 @@ impl Compiler {
             Expression::MemberExpression(member) => self.compile_member_expression(member)?,
             Expression::UnaryExpression(unary) => self.compile_unary_expression(unary)?,
             Expression::LogicalExpression(logical) => self.compile_logical_expression(logical)?,
+            Expression::NewExpression(new_expr) => self.compile_new_expression(new_expr)?,
+            Expression::ThisExpression(_) => {
+                self.emit(OpCode::PushThis);
+            }
         }
         Ok(())
     }
@@ -390,6 +394,7 @@ impl Compiler {
             BinaryOperator::LessThanEq => OpCode::LessEq,
             BinaryOperator::GreaterThan => OpCode::Greater,
             BinaryOperator::GreaterThanEq => OpCode::GreaterEq,
+            BinaryOperator::Instanceof => OpCode::InstanceOf,
         };
         self.bytecode.push(opcode);
         Ok(())
@@ -483,6 +488,17 @@ impl Compiler {
         }
 
         self.emit(OpCode::Call(call.arguments.len()));
+        Ok(())
+    }
+
+    fn compile_new_expression(&mut self, new_expr: &NewExpression) -> Result<(), CompilerError> {
+        self.compile_expression(&new_expr.callee)?;
+
+        for arg in &new_expr.arguments {
+            self.compile_expression(arg)?;
+        }
+
+        self.emit(OpCode::Construct(new_expr.arguments.len()));
         Ok(())
     }
 

@@ -26,6 +26,8 @@ pub enum TokenKind {
     Else,
     Function,
     Return,
+    New,
+    This,
 
     // Operators
     Plus,  // +
@@ -51,6 +53,9 @@ pub enum TokenKind {
     Bang,       // !
     LogicalAnd, // &&
     LogicalOr,  // ||
+
+    // Instanceof
+    Instanceof, // instanceof
 
     Semi,     // ;
     LBrace,   // {
@@ -279,6 +284,9 @@ impl Lexer {
                 "else" => TokenKind::Else,
                 "function" => TokenKind::Function,
                 "return" => TokenKind::Return,
+                "new" => TokenKind::New,
+                "this" => TokenKind::This,
+                "instanceof" => TokenKind::Instanceof,
                 _ => TokenKind::Ident(ident.to_string()),
             }
         })(input)

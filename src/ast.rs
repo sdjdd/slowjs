@@ -137,6 +137,8 @@ pub enum Expression {
     MemberExpression(MemberExpression),
     UnaryExpression(UnaryExpression),
     LogicalExpression(LogicalExpression),
+    NewExpression(NewExpression),
+    ThisExpression(ThisExpression),
 }
 
 impl Expression {
@@ -152,6 +154,8 @@ impl Expression {
             Expression::MemberExpression(member) => member.loc,
             Expression::UnaryExpression(unary) => unary.loc,
             Expression::LogicalExpression(logical) => logical.loc,
+            Expression::NewExpression(new) => new.loc,
+            Expression::ThisExpression(this) => this.loc,
         }
     }
 
@@ -214,6 +218,9 @@ pub enum BinaryOperator {
     LessThanEq,    // <=
     GreaterThan,   // >
     GreaterThanEq, // >=
+
+    // Instanceof
+    Instanceof, // instanceof
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -274,6 +281,18 @@ pub struct ReturnStatement {
 pub struct CallExpression {
     pub callee: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewExpression {
+    pub callee: Box<Expression>,
+    pub arguments: Vec<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThisExpression {
     pub loc: Option<SourceLocation>,
 }
 

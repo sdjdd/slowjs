@@ -49,11 +49,32 @@ pub struct PropertyDescriptor {
 
 #[derive(Clone)]
 pub struct JsFunction {
-    pub prototype: Gc<JsObject>,
+    pub object: JsObject,
+
     pub name: String,
     pub params: Vec<String>,
     pub body: FunctionBody,
+
+    /// The environment in which the function was defined
     pub env: Option<Rc<RefCell<Env>>>,
+
+    pub prototype: Option<Gc<JsObject>>,
+}
+
+impl JsFunction {
+    pub fn new(name: String, params: Vec<String>, body: FunctionBody) -> Self {
+        let mut object = JsObject::new();
+        object.set("name".to_string(), JsValue::String(name.clone()));
+        object.set("length".to_string(), JsValue::Number(params.len() as f64));
+        Self {
+            object,
+            name,
+            params,
+            body,
+            env: None,
+            prototype: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -62,7 +83,7 @@ pub enum FunctionBody {
     Native(fn(&NativeFnCtx)),
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstantTable {
     consts: Vec<Constant>,
 }
@@ -104,6 +125,7 @@ pub struct CodeBlock {
 pub struct NativeFnCtx<'a> {
     pub heap: &'a Heap,
     pub args: &'a [JsValue],
+    pub this_value: &'a JsValue,
     pub return_value: Option<JsValue>,
 }
 
@@ -153,6 +175,12 @@ impl JsObject {
         }
     }
 
+    pub fn with_prototype(prototype: Option<Gc<JsObject>>) -> Self {
+        let mut obj = Self::new();
+        obj.prototype = prototype;
+        obj
+    }
+
     pub fn set(&mut self, k: String, value: JsValue) {
         self.properties.insert(
             k,
@@ -165,12 +193,14 @@ impl JsObject {
         );
     }
 
-    pub fn get(&self, k: &str) -> JsValue {
-        self.properties
-            .get(k)
-            .cloned()
-            .map(|attrs| attrs.value)
-            .unwrap_or(JsValue::Undefined)
+    pub fn get(&self, heap: &Heap, k: &str) -> Option<JsValue> {
+        if let Some(desc) = self.properties.get(k) {
+            return Some(desc.value.clone());
+        }
+        if let Some(proto) = &self.prototype {
+            return heap.get_object(proto).get(heap, k);
+        }
+        None
     }
 }
 
@@ -204,5 +234,32 @@ pub fn to_number(value: &JsValue) -> f64 {
             }
         }
         _ => unimplemented!("to_number"),
+    }
+}
+
+pub fn is_object(value: &JsValue) -> bool {
+    match value {
+        JsValue::Null
+        | JsValue::Undefined
+        | JsValue::Boolean(_)
+        | JsValue::Number(_)
+        | JsValue::String(_) => false,
+        _ => true,
+    }
+}
+
+pub fn has_prototype(heap: &Heap, obj: &Gc<JsObject>, prototype: &Gc<JsObject>) -> bool {
+    let mut current = obj.clone();
+    loop {
+        let obj = heap.get_object(&current);
+        match &obj.prototype {
+            Some(proto) => {
+                if proto.index == prototype.index {
+                    return true;
+                }
+                current = proto.clone();
+            }
+            None => return false,
+        }
     }
 }

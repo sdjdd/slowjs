@@ -351,19 +351,44 @@ impl Parser {
     }
 
     fn parse_unary_expression(&mut self) -> Result<Expression, ParseError> {
-        if matches!(self.current(), TokenKind::Bang) {
-            let loc = self.current_loc();
-            self.advance();
-            let argument = self.parse_unary_expression()?;
-            Ok(Expression::UnaryExpression(UnaryExpression {
-                operator: UnaryOperator::Not,
-                argument: Box::new(argument),
-                prefix: true,
-                loc: Some(loc),
-            }))
-        } else {
-            self.parse_call_expression()
+        match self.current() {
+            TokenKind::Bang => {
+                let loc = self.current_loc();
+                self.advance();
+                let argument = self.parse_unary_expression()?;
+                Ok(Expression::UnaryExpression(UnaryExpression {
+                    operator: UnaryOperator::Not,
+                    argument: Box::new(argument),
+                    prefix: true,
+                    loc: Some(loc),
+                }))
+            }
+            TokenKind::New => self.parse_new_expression(),
+            _ => self.parse_call_expression(),
         }
+    }
+
+    fn parse_new_expression(&mut self) -> Result<Expression, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::New)?;
+        let callee = self.parse_member_expression()?;
+        loc.end = callee.loc().map(|l| l.end).unwrap();
+
+        let arguments = if matches!(self.current(), TokenKind::LParen) {
+            self.expect(TokenKind::LParen)?;
+            let args = self.parse_arguments()?;
+            loc.end = self.current_loc().end;
+            self.expect(TokenKind::RParen)?;
+            args
+        } else {
+            Vec::new()
+        };
+
+        Ok(Expression::NewExpression(NewExpression {
+            callee: Box::new(callee),
+            arguments,
+            loc: Some(loc),
+        }))
     }
 
     fn parse_call_expression(&mut self) -> Result<Expression, ParseError> {
@@ -483,6 +508,7 @@ impl Parser {
                 TokenKind::LessEq => BinaryOperator::LessThanEq,
                 TokenKind::Greater => BinaryOperator::GreaterThan,
                 TokenKind::GreaterEq => BinaryOperator::GreaterThanEq,
+                TokenKind::Instanceof => BinaryOperator::Instanceof,
                 _ => break,
             };
             self.advance();
@@ -552,6 +578,11 @@ impl Parser {
                 let loc = Some(self.current_loc());
                 self.advance();
                 Ok(Expression::Identifier(Identifier { name, loc }))
+            }
+            TokenKind::This => {
+                let loc = Some(self.current_loc());
+                self.advance();
+                Ok(Expression::ThisExpression(ThisExpression { loc }))
             }
             TokenKind::Function => self.parse_function_expression(),
             TokenKind::LBrace => self.parse_object_expression(),
