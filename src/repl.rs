@@ -1,4 +1,10 @@
-use rustyline::{DefaultEditor, error::ReadlineError};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use rustyline::{
+    Cmd, ConditionalEventHandler, DefaultEditor, Event, EventHandler, KeyCode, KeyEvent, Modifiers,
+    error::ReadlineError,
+};
 
 use slowjs::compiler::Compiler;
 use slowjs::js_std::console;
@@ -12,15 +18,38 @@ enum ReplError {
     Other(String),
 }
 
+struct InterruptHandler(Arc<AtomicBool>);
+
+impl ConditionalEventHandler for InterruptHandler {
+    fn handle(
+        &self,
+        _evt: &Event,
+        _n: rustyline::RepeatCount,
+        _positive: bool,
+        ctx: &rustyline::EventContext,
+    ) -> Option<Cmd> {
+        self.0.store(ctx.line().is_empty(), Ordering::Relaxed);
+        None
+    }
+}
+
 pub fn run() {
     println!("Welcome to SlowJS.");
-    println!("Press Ctrl-D to exit.");
 
     let mut rl = DefaultEditor::new().expect("Failed to create REPL");
     let mut vm = Vm::new();
     let mut lexer = Lexer::new();
     let mut compiler = Compiler::new();
     let mut input_buffer = String::new();
+
+    let mut interrupt_count = 0;
+    let empty_interrupt = Arc::new(AtomicBool::new(false));
+    let handle_interrupt = InterruptHandler(empty_interrupt.clone());
+
+    rl.bind_sequence(
+        Event::KeySeq(vec![KeyEvent(KeyCode::Char('c'), Modifiers::CTRL)]),
+        EventHandler::Conditional(Box::new(handle_interrupt)),
+    );
 
     loop {
         let prompt = if input_buffer.is_empty() {
@@ -35,6 +64,9 @@ pub fn run() {
 
                 let input = input.trim();
 
+                if input == ".exit" {
+                    break;
+                }
                 if input.is_empty() && input_buffer.is_empty() {
                     continue;
                 }
@@ -61,9 +93,19 @@ pub fn run() {
                 }
 
                 input_buffer.clear();
+                interrupt_count = 0;
             }
             Err(ReadlineError::Interrupted) => {
                 input_buffer.clear();
+                if empty_interrupt.load(Ordering::Relaxed) {
+                    interrupt_count += 1;
+                    if interrupt_count > 1 {
+                        break;
+                    }
+                    println!("(To exit, press Ctrl+C again or Ctrl+D or type .exit)");
+                } else {
+                    interrupt_count = 0;
+                }
                 continue;
             }
             Err(ReadlineError::Eof) => {
