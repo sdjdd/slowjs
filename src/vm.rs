@@ -315,7 +315,15 @@ impl Vm {
         js_std::new_std(&mut heap)
             .into_iter()
             .for_each(|(name, value)| {
-                global_obj.set(name, value);
+                global_obj.properties.insert(
+                    name,
+                    PropertyDescriptor {
+                        value,
+                        writable: true,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
             });
 
         let global_obj_ref = heap.alloc_object(global_obj);
