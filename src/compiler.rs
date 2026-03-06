@@ -10,7 +10,7 @@ use crate::vm::{Constant, ConstantPool, FunctionTemplate, OpCode};
 pub enum CompilerError {}
 
 pub struct Compiler {
-    bytecode: Vec<OpCode>,
+    bytecode: Vec<u8>,
     constants: ConstantPool,
 
     handle_directives: bool,
@@ -40,15 +40,33 @@ impl Compiler {
         index
     }
 
-    fn emit(&mut self, op: OpCode) {
-        self.bytecode.push(op);
+    fn emit(&mut self, op: OpCode) -> usize {
+        self.bytecode.push(op.into());
+        self.bytecode.len() - 1
+    }
+
+    fn emit_u8(&mut self, value: u8) -> usize {
+        self.bytecode.push(value);
+        self.bytecode.len() - 1
+    }
+
+    fn emit_u16(&mut self, value: u16) -> usize {
+        let bytes = u16::to_be_bytes(value);
+        self.emit_u8(bytes[0]);
+        self.emit_u8(bytes[1]) - 1
+    }
+
+    fn write_u16(&mut self, offset: usize, value: u16) {
+        let bytes = u16::to_be_bytes(value);
+        self.bytecode[offset] = bytes[0];
+        self.bytecode[offset + 1] = bytes[1];
     }
 
     pub fn get_result(&mut self) -> CompileResult {
         if let Some(op) = self.bytecode.last()
-            && *op != OpCode::Halt
+            && *op != OpCode::Halt as u8
         {
-            self.bytecode.push(OpCode::Halt);
+            self.emit(OpCode::Halt);
         }
 
         CompileResult {
@@ -122,23 +140,23 @@ impl Compiler {
     fn compile_if_statement(&mut self, stmt: &IfStatement) -> Result<(), CompilerError> {
         self.compile_expression(&stmt.test)?;
 
-        let else_jump_offset = self.bytecode.len();
-        self.bytecode.push(OpCode::JumpIfFalse(0));
+        self.emit(OpCode::JumpIfFalse);
+        let else_jump_offset = self.emit_u16(0);
 
         self.compile_statement(&stmt.consequent)?;
 
-        let end_jump_offset = self.bytecode.len();
-        self.bytecode.push(OpCode::Jump(0));
+        self.emit(OpCode::Jump);
+        let end_jump_offset = self.emit_u16(0);
 
         let else_addr = self.bytecode.len();
-        self.bytecode[else_jump_offset] = OpCode::JumpIfFalse(else_addr);
+        self.write_u16(else_jump_offset, else_addr as u16);
 
         if let Some(alternate) = &stmt.alternate {
             self.compile_statement(alternate)?;
         }
 
         let end_addr = self.bytecode.len();
-        self.bytecode[end_jump_offset] = OpCode::Jump(end_addr);
+        self.write_u16(end_jump_offset, end_addr as u16);
 
         Ok(())
     }
@@ -153,7 +171,8 @@ impl Compiler {
             };
 
             let name_index = self.add_constant(Constant::String(var_name.clone()));
-            self.emit(OpCode::DeclareVar(name_index));
+            self.emit(OpCode::DeclareVar);
+            self.emit_u16(name_index as u16);
 
             if let Some(init) = init {
                 if let Expression::FunctionExpression(func) = init {
@@ -162,7 +181,8 @@ impl Compiler {
                     self.compile_expression(init)?;
                 }
 
-                self.emit(OpCode::SetVar(name_index));
+                self.emit(OpCode::SetVar);
+                self.emit_u16(name_index as u16);
             }
         }
 
@@ -210,21 +230,21 @@ impl Compiler {
         match logical.operator {
             LogicalOperator::And => {
                 self.emit(OpCode::Dup);
-                let jump_to_end_offset = self.bytecode.len();
-                self.emit(OpCode::JumpIfFalse(0));
+                self.emit(OpCode::JumpIfFalse);
+                let jump_to_end_offset = self.emit_u16(0);
                 self.emit(OpCode::Pop);
                 self.compile_expression(&logical.right)?;
                 let end_addr = self.bytecode.len();
-                self.bytecode[jump_to_end_offset] = OpCode::JumpIfFalse(end_addr);
+                self.write_u16(jump_to_end_offset, end_addr as u16);
             }
             LogicalOperator::Or => {
                 self.emit(OpCode::Dup);
-                let jump_to_end_offset = self.bytecode.len();
-                self.emit(OpCode::JumpIfTrue(0));
+                self.emit(OpCode::JumpIfTrue);
+                let jump_to_end_offset = self.emit_u16(0);
                 self.emit(OpCode::Pop);
                 self.compile_expression(&logical.right)?;
                 let end_addr = self.bytecode.len();
-                self.bytecode[jump_to_end_offset] = OpCode::JumpIfTrue(end_addr);
+                self.write_u16(jump_to_end_offset, end_addr as u16);
             }
         }
 
@@ -233,7 +253,8 @@ impl Compiler {
 
     fn compile_identifier(&mut self, id: &Identifier) -> Result<(), CompilerError> {
         let name_index = self.add_constant(Constant::String(id.name.clone()));
-        self.emit(OpCode::GetVar(name_index));
+        self.emit(OpCode::GetVar);
+        self.emit_u16(name_index as u16);
         Ok(())
     }
 
@@ -249,7 +270,8 @@ impl Compiler {
 
             self.compile_expression(&property.value)?;
 
-            self.emit(OpCode::InitProperty(key_index));
+            self.emit(OpCode::InitProperty);
+            self.emit_u16(key_index as u16);
         }
 
         Ok(())
@@ -272,7 +294,8 @@ impl Compiler {
                 _ => unimplemented!(),
             };
             let key_index = self.add_constant(Constant::String(property_name.clone()));
-            self.emit(OpCode::GetProperty(key_index));
+            self.emit(OpCode::GetProperty);
+            self.emit_u16(key_index as u16);
         }
 
         Ok(())
@@ -300,7 +323,8 @@ impl Compiler {
                             _ => unimplemented!(),
                         };
                         let key_index = self.add_constant(Constant::String(property_name.clone()));
-                        self.emit(OpCode::SetProperty(key_index));
+                        self.emit(OpCode::SetProperty);
+                        self.emit_u16(key_index as u16);
                     }
                     return Ok(());
                 }
@@ -328,7 +352,8 @@ impl Compiler {
             AssignmentTarget::Pattern(pattern) => match pattern {
                 Pattern::Identifier(id) => {
                     let name_index = self.add_constant(Constant::String(id.name.clone()));
-                    self.emit(OpCode::SetVar(name_index));
+                    self.emit(OpCode::SetVar);
+                    self.emit_u16(name_index as u16);
                 }
             },
             _ => unreachable!(),
@@ -354,7 +379,9 @@ impl Compiler {
 
     fn compile_literal(&mut self, literal: &Literal) -> Result<(), CompilerError> {
         match &literal.value {
-            LiteralValue::Null => self.emit(OpCode::PushNull),
+            LiteralValue::Null => {
+                self.emit(OpCode::PushNull);
+            }
             LiteralValue::Boolean(b) => {
                 if *b {
                     self.emit(OpCode::PushTrue);
@@ -364,11 +391,13 @@ impl Compiler {
             }
             LiteralValue::Number(n) => {
                 let index = self.add_constant(Constant::Number(n.to_bits()));
-                self.emit(OpCode::PushConstant(index));
+                self.emit(OpCode::PushConstant);
+                self.emit_u16(index as u16);
             }
             LiteralValue::String(s) => {
                 let index = self.add_constant(Constant::String(s.clone()));
-                self.emit(OpCode::PushConstant(index));
+                self.emit(OpCode::PushConstant);
+                self.emit_u16(index as u16);
             }
         }
         Ok(())
@@ -394,7 +423,7 @@ impl Compiler {
             BinaryOperator::GreaterThanEq => OpCode::GreaterEq,
             BinaryOperator::Instanceof => OpCode::InstanceOf,
         };
-        self.bytecode.push(opcode);
+        self.emit(opcode);
         Ok(())
     }
 
@@ -403,9 +432,11 @@ impl Compiler {
         func: &FunctionDeclaration,
     ) -> Result<(), CompilerError> {
         let name_index = self.add_constant(Constant::String(func.id.name.clone()));
-        self.emit(OpCode::DeclareVar(name_index));
+        self.emit(OpCode::DeclareVar);
+        self.emit_u16(name_index as u16);
         self.compile_function_expression(&((*func).clone().into()), Some(&func.id.name))?;
-        self.emit(OpCode::SetVar(name_index));
+        self.emit(OpCode::SetVar);
+        self.emit_u16(name_index as u16);
         Ok(())
     }
 
@@ -423,7 +454,8 @@ impl Compiler {
             };
             params.push(param_name.clone());
             let name_index = self.add_constant(Constant::String(param_name.clone()));
-            self.emit(OpCode::DeclareVar(name_index));
+            self.emit(OpCode::DeclareVar);
+            self.emit_u16(name_index as u16);
         }
 
         let mut rest_stmts = Vec::new();
@@ -474,7 +506,8 @@ impl Compiler {
         };
 
         let index = self.add_constant(Constant::Function(func));
-        self.emit(OpCode::NewFunc(index));
+        self.emit(OpCode::NewFunc);
+        self.emit_u16(index as u16);
         Ok(())
     }
 
@@ -491,7 +524,9 @@ impl Compiler {
             self.compile_expression(arg)?;
         }
 
-        self.emit(OpCode::Call(call.arguments.len()));
+        self.emit(OpCode::Call);
+        self.emit_u8(call.arguments.len() as u8);
+
         Ok(())
     }
 
@@ -502,14 +537,18 @@ impl Compiler {
             self.compile_expression(arg)?;
         }
 
-        self.emit(OpCode::Construct(new_expr.arguments.len()));
+        self.emit(OpCode::Construct);
+        self.emit_u8(new_expr.arguments.len() as u8);
+
         Ok(())
     }
 
     fn compile_return_statement(&mut self, stmt: &ReturnStatement) -> Result<(), CompilerError> {
         match &stmt.argument {
             Some(expr) => self.compile_expression(expr)?,
-            None => self.emit(OpCode::PushUndefined),
+            None => {
+                self.emit(OpCode::PushUndefined);
+            }
         }
         self.emit(OpCode::Return);
         Ok(())
@@ -517,6 +556,6 @@ impl Compiler {
 }
 
 pub struct CompileResult {
-    pub bytecode: Vec<OpCode>,
+    pub bytecode: Vec<u8>,
     pub constants: ConstantPool,
 }

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::vm::{Constant, Env, FunctionTemplate, Heap, OpCode};
+use crate::vm::{Constant, Env, FunctionTemplate, Heap};
 
 #[derive(Clone, Copy)]
 pub struct Gc<T> {
@@ -121,7 +121,7 @@ impl ConstantTable {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct CodeBlock {
-    pub code: Vec<OpCode>,
+    pub code: Vec<u8>,
     pub constants: ConstantTable,
 }
 

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
 
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
 use crate::js_std;
@@ -58,6 +59,33 @@ impl CallFrame {
             is_constructor: false,
         }
     }
+
+    pub fn read_u8(&mut self) -> u8 {
+        let byte = self.code.code[self.ip];
+        self.ip += 1;
+        byte
+    }
+
+    pub fn read_u16(&mut self) -> u16 {
+        let byte1 = self.read_u8();
+        let byte2 = self.read_u8();
+        u16::from_be_bytes([byte1, byte2])
+    }
+
+    pub fn get_constant(&mut self) -> JsValue {
+        let index = self.read_u16();
+        self.code.constants.get(index as usize)
+    }
+
+    pub fn get_constant_string(&mut self) -> &String {
+        let index = self.read_u16();
+        self.code.constants.get_string(index as usize)
+    }
+
+    pub fn get_constant_func_tmpl(&mut self) -> &FunctionTemplate {
+        let index = self.read_u16();
+        self.code.constants.get_func_tmpl(index as usize)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -70,7 +98,8 @@ pub enum RuntimeError {
     TypeError(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
+#[repr(u8)]
 pub enum OpCode {
     PushNull,
     PushUndefined,
@@ -100,45 +129,45 @@ pub enum OpCode {
 
     Halt,
 
-    PushConstant(usize),
-    GetLocal(usize),
-    SetLocal(usize),
-    GetGlobal(usize),
-    SetGlobal(usize),
+    PushConstant,
+    GetLocal,
+    SetLocal,
+    GetGlobal,
+    SetGlobal,
 
-    DeclareVar(usize),
-    SetVar(usize),
-    GetVar(usize),
+    DeclareVar,
+    SetVar,
+    GetVar,
 
     /// Call a function with n arguments
-    Call(usize),
+    Call,
     /// Construct an object using new. Stack: [constructor, prototype, args...]
-    Construct(usize),
+    Construct,
     Return,
 
     /// Jump to instruction at index
-    Jump(usize),
+    Jump,
     /// Jump if top of stack is truthy
-    JumpIfTrue(usize),
+    JumpIfTrue,
     /// Jump if top of stack is falsy
-    JumpIfFalse(usize),
+    JumpIfFalse,
 
     NewObject,
 
     /// Set object property by string constant id, keep object on stack.
     ///
     /// Stack: `[object, value]` -> `[object]`
-    InitProperty(usize),
+    InitProperty,
 
     /// Set object property by string constant id, keep value on stack.
     ///
     /// Stack: `[object, value]` -> `[value]`
-    SetProperty(usize),
+    SetProperty,
 
     /// Get object property by string constant id.
     ///
     /// Stack: `[object]` -> `[value]`
-    GetProperty(usize),
+    GetProperty,
 
     /// Get object element.
     ///
@@ -150,7 +179,7 @@ pub enum OpCode {
     /// Stack: `[object, key, value]` -> `[value]`
     SetElement,
 
-    NewFunc(usize),
+    NewFunc,
 
     /// Stack: `[object, constructor]` -> `[boolean]`
     InstanceOf,
@@ -403,7 +432,7 @@ impl Vm {
 
     pub fn run_script(
         &mut self,
-        bytecode: &[OpCode],
+        bytecode: &[u8],
         constants: &ConstantPool,
     ) -> Result<(), RuntimeError> {
         let env = match self.frames.last() {
@@ -436,7 +465,11 @@ impl Vm {
                 continue;
             }
 
-            let op = frame.code.code[frame.ip].clone();
+            let op: OpCode = frame.code.code[frame.ip]
+                .clone()
+                .try_into()
+                .expect("invalid opcode");
+
             frame.ip += 1;
 
             match op {
@@ -523,17 +556,17 @@ impl Vm {
                 OpCode::Halt => {
                     break;
                 }
-                OpCode::PushConstant(index) => {
-                    let value = frame.code.constants.get(index);
+                OpCode::PushConstant => {
+                    let value = frame.get_constant();
                     self.stack.push(value);
                 }
-                OpCode::DeclareVar(const_idx) => {
-                    let name = frame.code.constants.get_string(const_idx);
+                OpCode::DeclareVar => {
+                    let name = frame.get_constant_string().clone();
                     if frame.env.borrow().is_root() {
                         self.heap
                             .get_object_mut(&self.global_obj)
                             .properties
-                            .entry(name.clone())
+                            .entry(name)
                             .or_insert(PropertyDescriptor {
                                 value: JsValue::Undefined,
                                 configurable: true,
@@ -541,14 +574,11 @@ impl Vm {
                                 enumerable: true,
                             });
                     } else {
-                        frame
-                            .env
-                            .borrow_mut()
-                            .declare_var(name.clone(), JsValue::Undefined);
+                        frame.env.borrow_mut().declare_var(name, JsValue::Undefined);
                     }
                 }
-                OpCode::SetVar(const_idx) => {
-                    let name = frame.code.constants.get_string(const_idx);
+                OpCode::SetVar => {
+                    let name = frame.get_constant_string().clone();
                     let value = self.stack.last().unwrap();
                     if frame.env.borrow().is_root() {
                         self.heap
@@ -558,20 +588,25 @@ impl Vm {
                         frame.env.borrow_mut().set_var(name.clone(), value.clone());
                     }
                 }
-                OpCode::GetVar(const_idx) => {
-                    let name = frame.code.constants.get_string(const_idx);
-                    let mut value = frame.env.borrow().get_var(name);
+                OpCode::GetVar => {
+                    let name = frame.get_constant_string().clone();
+                    let mut value = frame.env.borrow().get_var(&name);
                     if value.is_none() {
-                        value = self.heap.get_object(&self.global_obj).get(&self.heap, name);
+                        value = self
+                            .heap
+                            .get_object(&self.global_obj)
+                            .get(&self.heap, &name);
                     }
-                    let value = value.ok_or(RuntimeError::ReferenceError(name.clone()))?;
+                    let value = value.ok_or(RuntimeError::ReferenceError(name))?;
                     self.stack.push(value);
                 }
-                OpCode::GetLocal(index) => {
+                OpCode::GetLocal => {
+                    let index = frame.read_u8() as usize;
                     let value = self.stack[frame.base + 1 + index].clone();
                     self.stack.push(value);
                 }
-                OpCode::SetLocal(index) => {
+                OpCode::SetLocal => {
+                    let index = frame.read_u8() as usize;
                     let value = self.stack.last().unwrap().clone();
                     let index = frame.base + 1 + index;
                     if index >= self.stack.len() {
@@ -579,37 +614,42 @@ impl Vm {
                     }
                     self.stack[index] = value;
                 }
-                OpCode::GetGlobal(name_index) => {
-                    let name = frame.code.constants.get_string(name_index);
+                OpCode::GetGlobal => {
+                    let name = frame.get_constant_string();
                     let global_obj = self.heap.get_object(&self.global_obj);
                     let value = global_obj
                         .get(&self.heap, name)
                         .ok_or(RuntimeError::ReferenceError(name.clone()))?;
                     self.stack.push(value);
                 }
-                OpCode::SetGlobal(name_index) => {
+                OpCode::SetGlobal => {
                     let value = self.stack.last().unwrap();
-                    let name = frame.code.constants.get_string(name_index);
+                    let name = frame.get_constant_string();
                     let global_obj = self.heap.get_object_mut(&self.global_obj);
                     global_obj.set(name.clone(), value.clone());
                 }
-                OpCode::Call(argc) => self.handle_op_call(argc)?,
-                OpCode::Construct(argc) => self.handle_op_construct(argc)?,
-
+                OpCode::Call => {
+                    self.handle_op_call()?;
+                }
+                OpCode::Construct => {
+                    self.handle_op_construct()?;
+                }
                 OpCode::Return => {
                     self.end_current_frame();
                 }
-                OpCode::Jump(addr) => {
-                    frame.ip = addr;
+                OpCode::Jump => {
+                    frame.ip = frame.read_u16() as usize;
                 }
-                OpCode::JumpIfTrue(addr) => {
+                OpCode::JumpIfTrue => {
                     let value = self.stack.pop().unwrap();
+                    let addr = frame.read_u16() as usize;
                     if value.to_bool() {
                         frame.ip = addr;
                     }
                 }
-                OpCode::JumpIfFalse(addr) => {
+                OpCode::JumpIfFalse => {
                     let value = self.stack.pop().unwrap();
+                    let addr = frame.read_u16() as usize;
                     if !value.to_bool() {
                         frame.ip = addr;
                     }
@@ -619,10 +659,10 @@ impl Vm {
                     let obj = self.heap.alloc_object(obj);
                     self.stack.push(JsValue::Object(obj));
                 }
-                OpCode::InitProperty(const_id) => {
+                OpCode::InitProperty => {
                     let value = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap();
-                    let key = frame.code.constants.get_string(const_id);
+                    let key = frame.get_constant_string();
                     let obj_ref = match obj {
                         JsValue::Object(obj) => obj,
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
@@ -631,10 +671,10 @@ impl Vm {
                     obj.set(key.to_string(), value);
                     self.stack.push(JsValue::Object(obj_ref));
                 }
-                OpCode::SetProperty(key_index) => {
+                OpCode::SetProperty => {
                     let value = self.stack.pop().unwrap();
                     let obj = self.stack.pop().unwrap();
-                    let key = frame.code.constants.get_string(key_index);
+                    let key = frame.get_constant_string();
 
                     let obj = match obj {
                         JsValue::Object(obj) => self.heap.get_object_mut(&obj),
@@ -647,7 +687,7 @@ impl Vm {
 
                     obj.set(key.clone(), value);
                 }
-                OpCode::GetProperty(key_index) => {
+                OpCode::GetProperty => {
                     let obj = match self.stack.pop().unwrap() {
                         JsValue::Object(obj) => self.heap.get_object(&obj),
                         JsValue::Function(func) => {
@@ -657,7 +697,7 @@ impl Vm {
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
                     };
 
-                    let key = frame.code.constants.get_string(key_index);
+                    let key = frame.get_constant_string();
 
                     self.stack
                         .push(obj.get(&self.heap, key).unwrap_or(JsValue::Undefined));
@@ -702,8 +742,8 @@ impl Vm {
 
                     obj.set(key, value);
                 }
-                OpCode::NewFunc(index) => {
-                    let tmpl = frame.code.constants.get_func_tmpl(index);
+                OpCode::NewFunc => {
+                    let tmpl = frame.get_constant_func_tmpl();
                     let mut func = JsFunction::new(
                         tmpl.name.clone(),
                         tmpl.params.clone(),
@@ -736,8 +776,9 @@ impl Vm {
         Ok(())
     }
 
-    fn handle_op_call(&mut self, argc: usize) -> Result<(), RuntimeError> {
+    fn handle_op_call(&mut self) -> Result<(), RuntimeError> {
         // Stack: [func, this, args...]
+        let argc = self.frames.last_mut().unwrap().read_u8() as usize;
         let base = self.stack.len() - argc - 2;
         let args = self.stack.split_off(base + 2);
         let this = self.stack.pop().unwrap();
@@ -749,8 +790,9 @@ impl Vm {
         Ok(())
     }
 
-    fn handle_op_construct(&mut self, argc: usize) -> Result<(), RuntimeError> {
+    fn handle_op_construct(&mut self) -> Result<(), RuntimeError> {
         // Stack: [constructor, args...]
+        let argc = self.frames.last_mut().unwrap().read_u8() as usize;
         let base = self.stack.len() - argc - 1;
         let args = self.stack.split_off(base + 1);
         let constructor = match self.stack.pop().unwrap() {
