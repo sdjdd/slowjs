@@ -476,7 +476,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_unary_expression()?;
-            left = Expression::new_binary(op, left, right);
+            let loc: SourceLocation = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::new_binary(op, left, right, Some(loc));
         }
 
         Ok(left)
@@ -493,7 +497,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_multiplicative_expression()?;
-            left = Expression::new_binary(op, left, right);
+            let loc: SourceLocation = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::new_binary(op, left, right, Some(loc));
         }
 
         Ok(left)
@@ -513,7 +521,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_additive_expression()?;
-            left = Expression::new_binary(op, left, right);
+            let loc: SourceLocation = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::new_binary(op, left, right, Some(loc));
         }
 
         Ok(left)
@@ -530,7 +542,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_relational_expression()?;
-            left = Expression::new_binary(op, left, right);
+            let loc: SourceLocation = SourceLocation::new(
+                left.loc().map(|l| l.start).unwrap(),
+                right.loc().map(|l| l.end).unwrap(),
+            );
+            left = Expression::new_binary(op, left, right, Some(loc));
         }
 
         Ok(left)

@@ -159,12 +159,17 @@ impl Expression {
         }
     }
 
-    pub fn new_binary(operator: BinaryOperator, left: Expression, right: Expression) -> Self {
+    pub fn new_binary(
+        operator: BinaryOperator,
+        left: Expression,
+        right: Expression,
+        loc: Option<SourceLocation>,
+    ) -> Self {
         Expression::BinaryExpression(BinaryExpression {
             operator,
             left: Box::new(left),
             right: Box::new(right),
-            loc: None,
+            loc,
         })
     }
 }

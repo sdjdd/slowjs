@@ -630,6 +630,10 @@ impl Vm {
 
                     let obj = match obj {
                         JsValue::Object(obj) => self.heap.get_object_mut(&obj),
+                        JsValue::Function(func) => {
+                            let func = self.heap.get_func_mut(&func);
+                            &mut func.object
+                        }
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
                     };
 
@@ -675,6 +679,10 @@ impl Vm {
                     let key_val = self.stack.pop().unwrap();
                     let obj = match self.stack.pop().unwrap() {
                         JsValue::Object(obj) => self.heap.get_object_mut(&obj),
+                        JsValue::Function(func) => {
+                            let func = self.heap.get_func_mut(&func);
+                            &mut func.object
+                        }
                         _ => return Err(RuntimeError::TypeError("not an object".to_string())),
                     };
 
@@ -693,7 +701,10 @@ impl Vm {
                         tmpl.params.clone(),
                         FunctionBody::Script(tmpl.code_block.clone()),
                     );
-                    func.prototype = Some(self.heap.alloc_object(JsObject::new()));
+                    func.object.set(
+                        "prototype".to_string(),
+                        JsValue::Object(self.heap.alloc_object(JsObject::new())),
+                    );
                     func.env = Some(frame.env.clone());
                     let func = self.heap.alloc_func(func);
                     let value = JsValue::Function(func);
@@ -705,12 +716,7 @@ impl Vm {
 
                     let result = match (obj, constructor) {
                         (JsValue::Object(obj), JsValue::Function(constructor)) => {
-                            let constructor = self.heap.get_func(&constructor);
-                            if let Some(proto) = &constructor.prototype {
-                                runtime::has_prototype(&self.heap, &obj, proto)
-                            } else {
-                                false
-                            }
+                            runtime::is_instance_of(&self.heap, &obj, &constructor)
                         }
                         _ => false,
                     };
@@ -723,14 +729,15 @@ impl Vm {
     }
 
     fn handle_op_call(&mut self, argc: usize) -> Result<(), RuntimeError> {
-        // Stack: [func, args...]
-        let base = self.stack.len() - argc - 1;
-        let args = self.stack.split_off(base + 1);
+        // Stack: [func, this, args...]
+        let base = self.stack.len() - argc - 2;
+        let args = self.stack.split_off(base + 2);
+        let this = self.stack.pop().unwrap();
         let func = match self.stack.pop().unwrap() {
             JsValue::Function(func) => func,
             _ => return Err(RuntimeError::TypeError("not a function".to_string())),
         };
-        self.handle_function_call(base, JsValue::Undefined, func, args)?;
+        self.handle_function_call(base, this, func, args)?;
         Ok(())
     }
 
@@ -743,9 +750,12 @@ impl Vm {
             _ => return Err(RuntimeError::TypeError("not a function".to_string())),
         };
         let this = {
-            let func = self.heap.get_func(&constructor);
             let mut this = JsObject::new();
-            this.prototype = func.prototype.clone();
+            let constructor = self.heap.get_func(&constructor);
+            let constructor_proto = constructor.object.get(&self.heap, "prototype");
+            if let Some(JsValue::Object(proto)) = constructor_proto {
+                this.prototype = Some(proto.clone());
+            }
             JsValue::Object(self.heap.alloc_object(this))
         };
         let frame_len = self.frames.len();

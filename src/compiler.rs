@@ -483,6 +483,12 @@ impl Compiler {
     fn compile_call_expression(&mut self, call: &CallExpression) -> Result<(), CompilerError> {
         self.compile_expression(&call.callee)?;
 
+        if let Expression::MemberExpression(member) = call.callee.as_ref() {
+            self.compile_expression(&member.object)?;
+        } else {
+            self.emit(OpCode::PushThis);
+        }
+
         for arg in &call.arguments {
             self.compile_expression(arg)?;
         }

@@ -248,7 +248,12 @@ pub fn is_object(value: &JsValue) -> bool {
     }
 }
 
-pub fn has_prototype(heap: &Heap, obj: &Gc<JsObject>, prototype: &Gc<JsObject>) -> bool {
+pub fn is_instance_of(heap: &Heap, obj: &Gc<JsObject>, constructor: &Gc<JsFunction>) -> bool {
+    let constructor = heap.get_func(constructor);
+    let prototype = match constructor.object.get(heap, "prototype") {
+        Some(JsValue::Object(prototype)) => prototype,
+        _ => return false,
+    };
     let mut current = obj.clone();
     loop {
         let obj = heap.get_object(&current);
