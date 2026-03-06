@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use colored::Colorize;
 use rustyline::{
     Cmd, ConditionalEventHandler, DefaultEditor, Event, EventHandler, KeyCode, KeyEvent, Modifiers,
     error::ReadlineError,
@@ -76,7 +77,7 @@ pub fn run() {
                 match process_input(&input_buffer, &mut lexer, &mut compiler, &mut vm) {
                     Ok(value) => match value {
                         JsValue::String(s) => {
-                            println!("'{s}'");
+                            println!("{}", format!("'{s}'").green());
                         }
                         _ => {
                             console::print(&vm.heap, &value);

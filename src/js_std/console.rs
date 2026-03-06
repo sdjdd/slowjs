@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use colored::Colorize;
+
 use crate::{
     runtime::{FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx},
     vm::Heap,
@@ -44,7 +46,7 @@ impl<'a> ObjectRefCounter<'a> {
 }
 
 fn print_function(f: &JsFunction) {
-    print!("[Function: {}]", f.name)
+    print!("{}", format!("[Function: {}]", f.name).cyan())
 }
 
 fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut ObjectRefCounter) {
@@ -57,7 +59,7 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
     }
 
     if let Some(id) = counter.ref_ids.get(&ptr) {
-        print!("<ref *{}> ", id);
+        print!("{}", format!("<ref *{}> ", id).cyan());
     }
 
     counter.visited.insert(ptr);
@@ -75,11 +77,15 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
             JsValue::Object(o) => {
                 let ptr = o.index;
                 if counter.visited.contains(&ptr) {
-                    print!("[Circular *{}]", counter.ref_ids.get(&ptr).unwrap());
+                    print!(
+                        "{}",
+                        format!("[Circular *{}]", counter.ref_ids.get(&ptr).unwrap()).cyan()
+                    );
                 } else {
                     print_object(heap, o, depth + 1, counter);
                 }
             }
+            JsValue::String(s) => print!("{}", format!("'{}'", s).green()),
             _ => print_with_depth(heap, &v.value, depth + 1),
         };
         println!(",");
@@ -94,24 +100,24 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
 
 fn print_with_depth(heap: &Heap, value: &JsValue, depth: usize) {
     match value {
-        JsValue::Null => print!("null"),
-        JsValue::Undefined => print!("undefined"),
-        JsValue::Boolean(b) => print!("{b}"),
+        JsValue::Null => print!("{}", "null".white()),
+        JsValue::Undefined => print!("{}", "undefined".black()),
+        JsValue::Boolean(b) => print!("{}", b.to_string().yellow()),
         JsValue::Number(n) => {
             if n.is_infinite() {
                 return if n.is_sign_positive() {
-                    print!("Infinity");
+                    print!("{}", "Infinity".yellow());
                 } else {
-                    print!("-Infinity");
+                    print!("{}", "-Infinity".yellow());
                 };
             }
             if n.is_nan() {
-                return print!("NaN");
+                return print!("{}", "NaN".yellow());
             }
             if n.fract() == 0.0 {
-                print!("{:.0}", n);
+                print!("{}", format!("{:.0}", n).yellow());
             } else {
-                print!("{}", n);
+                print!("{}", format!("{}", n).yellow());
             }
         }
         JsValue::String(s) => print!("{s}"),
