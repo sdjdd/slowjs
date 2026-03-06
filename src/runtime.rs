@@ -77,10 +77,12 @@ impl JsFunction {
     }
 }
 
+pub type NativeFn = fn(&mut NativeFnCtx);
+
 #[derive(Clone)]
 pub enum FunctionBody {
     Script(Rc<CodeBlock>),
-    Native(fn(&NativeFnCtx)),
+    Native(NativeFn),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,7 +125,7 @@ pub struct CodeBlock {
 }
 
 pub struct NativeFnCtx<'a> {
-    pub heap: &'a Heap,
+    pub heap: &'a mut Heap,
     pub args: &'a [JsValue],
     pub this_value: &'a JsValue,
     pub return_value: Option<JsValue>,
@@ -245,6 +247,14 @@ pub fn is_object(value: &JsValue) -> bool {
         | JsValue::Number(_)
         | JsValue::String(_) => false,
         _ => true,
+    }
+}
+
+pub fn to_object<'a>(heap: &'a Heap, value: &JsValue) -> &'a JsObject {
+    match value {
+        JsValue::Object(o) => heap.get_object(o),
+        JsValue::Function(f) => &heap.get_func(f).object,
+        _ => unimplemented!(),
     }
 }
 

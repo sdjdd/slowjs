@@ -128,7 +128,7 @@ fn print_with_depth(heap: &Heap, value: &JsValue, depth: usize) {
     }
 }
 
-fn console_log(ctx: &NativeFnCtx) {
+fn console_log(ctx: &mut NativeFnCtx) {
     for (i, arg) in ctx.args.iter().enumerate() {
         if i > 0 {
             print!(" ");

@@ -775,7 +775,7 @@ impl Vm {
         args: Vec<JsValue>,
     ) -> Result<(), RuntimeError> {
         let func = self.heap.get_func(&func);
-        match &func.body {
+        match func.body.clone() {
             FunctionBody::Script(code) => {
                 let env = Rc::new(RefCell::new(Env::new(func.env.as_ref().cloned())));
 
@@ -803,14 +803,14 @@ impl Vm {
                     args.resize(func.params.len(), JsValue::Undefined);
                 }
 
-                let ctx = NativeFnCtx {
-                    heap: &self.heap,
+                let mut ctx = NativeFnCtx {
+                    heap: &mut self.heap,
                     args: &args,
                     this_value: &this,
                     return_value: None,
                 };
 
-                native_fn(&ctx);
+                native_fn(&mut ctx);
 
                 self.stack
                     .push(ctx.return_value.unwrap_or(JsValue::Undefined));
