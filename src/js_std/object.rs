@@ -49,13 +49,20 @@ fn object_assign(ctx: &mut NativeFnCtx) {
         }
     }
 
-    let target: &mut JsObject = match ctx.args.get(0) {
+    match ctx.args.get(0) {
         Some(v) => match v {
-            JsValue::Object(o) => ctx.heap.get_object_mut(o),
-            JsValue::Function(f) => &mut ctx.heap.get_func_mut(f).object,
+            JsValue::Object(o) => {
+                ctx.heap.get_object_mut(o).properties.extend(temp);
+                ctx.return_value = Some(JsValue::Object(o.clone()));
+            }
+            JsValue::Function(f) => {
+                ctx.heap.get_func_mut(f).object.properties.extend(temp);
+                ctx.return_value = Some(JsValue::Function(f.clone()));
+            }
             _ => {
-                let gc = ctx.heap.alloc_object(JsObject::new());
-                ctx.heap.get_object_mut(&gc)
+                let mut obj = JsObject::new();
+                obj.properties.extend(temp);
+                ctx.return_value = Some(JsValue::Object(ctx.heap.alloc_object(obj)));
             }
         },
         None => {
@@ -63,6 +70,4 @@ fn object_assign(ctx: &mut NativeFnCtx) {
             unimplemented!()
         }
     };
-
-    target.properties.extend(temp);
 }
