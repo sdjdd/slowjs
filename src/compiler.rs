@@ -18,13 +18,11 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn new() -> Self {
-        let compiler = Self {
+        Self {
             bytecode: Vec::new(),
             constants: Vec::new(),
             handle_directives: true,
-        };
-
-        compiler
+        }
     }
 
     pub fn reset(&mut self) {

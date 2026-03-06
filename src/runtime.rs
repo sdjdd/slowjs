@@ -8,9 +8,10 @@ pub struct Gc<T> {
     _marker: std::marker::PhantomData<T>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum JsValue {
     Null,
+    #[default]
     Undefined,
     Boolean(bool),
     Number(f64),
@@ -137,12 +138,6 @@ impl<T> Gc<T> {
             index,
             _marker: std::marker::PhantomData,
         }
-    }
-}
-
-impl Default for JsValue {
-    fn default() -> Self {
-        Self::Undefined
     }
 }
 

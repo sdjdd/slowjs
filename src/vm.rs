@@ -285,7 +285,7 @@ impl Env {
         if let Some(outer) = &self.outer {
             return outer.borrow_mut().set_var(name, value);
         }
-        return false;
+        false
     }
 
     fn get_var(&self, name: &str) -> Option<JsValue> {
@@ -806,7 +806,7 @@ impl Vm {
                 })
             }
             FunctionBody::Native(native_fn) => {
-                let mut args = Vec::from(args);
+                let mut args = args;
                 if args.len() < func.params.len() {
                     args.resize(func.params.len(), JsValue::Undefined);
                 }

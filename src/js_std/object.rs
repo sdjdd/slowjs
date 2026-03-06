@@ -24,7 +24,7 @@ pub fn new_object_constructor(heap: &mut Heap) -> JsValue {
 }
 
 fn object_constructor(ctx: &mut NativeFnCtx) {
-    let value = ctx.args.get(0).unwrap_or(&JsValue::Undefined);
+    let value = ctx.args.first().unwrap_or(&JsValue::Undefined);
     let return_value = match value {
         JsValue::Undefined | JsValue::Null => {
             JsValue::Object(ctx.heap.alloc_object(JsObject::new()))
@@ -49,7 +49,7 @@ fn object_assign(ctx: &mut NativeFnCtx) {
         }
     }
 
-    match ctx.args.get(0) {
+    match ctx.args.first() {
         Some(v) => match v {
             JsValue::Object(o) => {
                 ctx.heap.get_object_mut(o).properties.extend(temp);
