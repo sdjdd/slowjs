@@ -101,7 +101,7 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
 fn print_with_depth(heap: &Heap, value: &JsValue, depth: usize) {
     match value {
         JsValue::Null => print!("{}", "null".white()),
-        JsValue::Undefined => print!("{}", "undefined".black()),
+        JsValue::Undefined => print!("{}", "undefined".dimmed()),
         JsValue::Boolean(b) => print!("{}", b.to_string().yellow()),
         JsValue::Number(n) => {
             if n.is_infinite() {
