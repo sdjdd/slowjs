@@ -581,12 +581,10 @@ impl Vm {
                 OpCode::SetVar => {
                     let name = frame.get_constant_string().clone();
                     let value = self.stack.last().unwrap();
-                    if frame.env.borrow().is_root() {
+                    if !frame.env.borrow_mut().set_var(name.clone(), value.clone()) {
                         self.heap
                             .get_object_mut(&self.global_obj)
                             .set(name.clone(), value.clone());
-                    } else {
-                        frame.env.borrow_mut().set_var(name.clone(), value.clone());
                     }
                 }
                 OpCode::GetVar => {
