@@ -1,11 +1,4 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use colored::Colorize;
-use rustyline::{
-    Cmd, ConditionalEventHandler, DefaultEditor, Event, EventHandler, KeyCode, KeyEvent, Modifiers,
-    error::ReadlineError,
-};
 
 use slowjs::compiler::Compiler;
 use slowjs::js_std::console;
@@ -14,110 +7,148 @@ use slowjs::parser::{ParseError, Parser};
 use slowjs::runtime::JsValue;
 use slowjs::vm::Vm;
 
+mod editor;
+
+use crate::repl::editor::{Editor, EditorContext, EditorEventHandler};
+
 enum ReplError {
     ImcompleteInput,
     Other(String),
 }
 
-struct InterruptHandler(Arc<AtomicBool>);
+struct Repl {
+    compiler: Compiler,
+    vm: Vm,
+    input_buffer: String,
+}
 
-impl ConditionalEventHandler for InterruptHandler {
-    fn handle(
-        &self,
-        _evt: &Event,
-        _n: rustyline::RepeatCount,
-        _positive: bool,
-        ctx: &rustyline::EventContext,
-    ) -> Option<Cmd> {
-        self.0.store(ctx.line().is_empty(), Ordering::Relaxed);
-        None
+impl Repl {
+    fn new() -> Self {
+        Self {
+            compiler: Compiler::new(),
+            vm: Vm::new(),
+            input_buffer: String::new(),
+        }
+    }
+
+    fn process_input(&mut self) -> Result<JsValue, ReplError> {
+        let tokens = Lexer::new()
+            .tokenize(&self.input_buffer)
+            .map_err(|e| ReplError::Other(e.to_string()))?;
+
+        if tokens.is_empty() {
+            return Ok(JsValue::Undefined);
+        }
+
+        let first_token = tokens[0].kind.clone();
+
+        let mut parser = Parser::new(tokens);
+
+        self.compiler.reset();
+
+        let result = {
+            if matches!(first_token, TokenKind::Var | TokenKind::Function) {
+                let program = parser.parse_program().map_err(map_parse_error)?;
+                self.compiler.compile(&program).unwrap()
+            } else {
+                // Try to parse expression
+                if let Ok(expr) = parser.parse_expression()
+                    && parser.is_complete()
+                {
+                    self.compiler.compile_expression(&expr).unwrap();
+                    self.compiler.get_result()
+                } else {
+                    // Fallback to statements
+                    parser.reset();
+                    let program = parser.parse_program().map_err(map_parse_error)?;
+                    self.compiler.compile(&program).unwrap()
+                }
+            }
+        };
+
+        self.vm
+            .run_script(&result.bytecode, &result.constants)
+            .map_err(|e| ReplError::Other(e.to_string()))?;
+
+        Ok(self.vm.pop().unwrap_or(JsValue::Undefined))
+    }
+
+    fn get_hint_candidates(&self, input: &str) -> Vec<String> {
+        let search = input.trim_start();
+        self.vm
+            .get_global_idents()
+            .iter()
+            .filter(|id| id.starts_with(search))
+            .map(|id| id[search.len()..].to_string())
+            .collect()
+    }
+
+    fn get_completion_candidates(&self, input: &str) -> Vec<String> {
+        let search = input.trim_start();
+        self.vm
+            .get_global_enumerable_idents()
+            .iter()
+            .filter(|id| id.starts_with(search))
+            .map(|id| id[search.len()..].to_string())
+            .collect()
+    }
+}
+
+impl EditorEventHandler for Repl {
+    fn handle_input(&mut self, line: String, ctx: &mut EditorContext) {
+        let input = line.trim();
+
+        if input == ".exit" {
+            ctx.exit();
+            return;
+        }
+        if input.is_empty() && self.input_buffer.is_empty() {
+            return;
+        }
+
+        self.input_buffer.push_str(input);
+
+        match self.process_input() {
+            Ok(value) => {
+                match value {
+                    JsValue::String(s) => {
+                        println!("{}", format!("'{s}'").green());
+                    }
+                    _ => {
+                        console::print(&self.vm.heap, &value);
+                        println!();
+                    }
+                };
+
+                ctx.set_prompt("> ".to_string());
+                self.input_buffer.clear();
+            }
+            Err(ReplError::ImcompleteInput) => {
+                self.input_buffer.push('\n');
+                ctx.set_prompt("... ".to_string());
+            }
+            Err(ReplError::Other(e)) => {
+                println!("Error: {e}");
+            }
+        }
+    }
+
+    fn handle_hint(&mut self, input: String) -> Option<Vec<String>> {
+        Some(self.get_hint_candidates(&input))
+    }
+
+    fn handle_completion(&mut self, input: String) -> Option<Vec<String>> {
+        Some(self.get_completion_candidates(&input))
     }
 }
 
 pub fn run() {
     println!("Welcome to SlowJS.");
 
-    let mut rl = DefaultEditor::new().expect("Failed to create REPL");
-    let mut vm = Vm::new();
-    let mut lexer = Lexer::new();
-    let mut compiler = Compiler::new();
-    let mut input_buffer = String::new();
+    let repl = Repl::new();
+    let mut editor = Editor::new(Box::new(repl));
 
-    let mut interrupt_count = 0;
-    let empty_interrupt = Arc::new(AtomicBool::new(false));
-    let handle_interrupt = InterruptHandler(empty_interrupt.clone());
-
-    rl.bind_sequence(
-        Event::KeySeq(vec![KeyEvent(KeyCode::Char('c'), Modifiers::CTRL)]),
-        EventHandler::Conditional(Box::new(handle_interrupt)),
-    );
-
-    loop {
-        let prompt = if input_buffer.is_empty() {
-            "> "
-        } else {
-            "... "
-        };
-
-        match rl.readline(prompt) {
-            Ok(input) => {
-                let _ = rl.add_history_entry(input.as_str());
-
-                let input = input.trim();
-
-                if input == ".exit" {
-                    break;
-                }
-                if input.is_empty() && input_buffer.is_empty() {
-                    continue;
-                }
-
-                input_buffer.push_str(input);
-
-                match process_input(&input_buffer, &mut lexer, &mut compiler, &mut vm) {
-                    Ok(value) => match value {
-                        JsValue::String(s) => {
-                            println!("{}", format!("'{s}'").green());
-                        }
-                        _ => {
-                            console::print(&vm.heap, &value);
-                            println!();
-                        }
-                    },
-                    Err(ReplError::ImcompleteInput) => {
-                        input_buffer.push('\n');
-                        continue;
-                    }
-                    Err(ReplError::Other(e)) => {
-                        println!("Error: {e}");
-                    }
-                }
-
-                input_buffer.clear();
-                interrupt_count = 0;
-            }
-            Err(ReadlineError::Interrupted) => {
-                input_buffer.clear();
-                if empty_interrupt.load(Ordering::Relaxed) {
-                    interrupt_count += 1;
-                    if interrupt_count > 1 {
-                        break;
-                    }
-                    println!("(To exit, press Ctrl+C again or Ctrl+D or type .exit)");
-                } else {
-                    interrupt_count = 0;
-                }
-                continue;
-            }
-            Err(ReadlineError::Eof) => {
-                break;
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
-            }
-        }
-    }
+    editor.read_lines();
 }
 
 fn map_parse_error(e: ParseError) -> ReplError {
@@ -128,50 +159,4 @@ fn map_parse_error(e: ParseError) -> ReplError {
         } => ReplError::ImcompleteInput,
         e => ReplError::Other(e.to_string()),
     }
-}
-
-fn process_input(
-    input: &str,
-    lexer: &mut Lexer,
-    compiler: &mut Compiler,
-    vm: &mut Vm,
-) -> Result<JsValue, ReplError> {
-    let tokens = lexer
-        .tokenize(input)
-        .map_err(|e| ReplError::Other(e.to_string()))?;
-
-    if tokens.is_empty() {
-        return Ok(JsValue::Undefined);
-    }
-
-    let first_token = tokens[0].kind.clone();
-
-    let mut parser = Parser::new(tokens);
-
-    compiler.reset();
-
-    let result = {
-        if matches!(first_token, TokenKind::Var | TokenKind::Function) {
-            let program = parser.parse_program().map_err(map_parse_error)?;
-            compiler.compile(&program).unwrap()
-        } else {
-            // Try to parse expression
-            if let Ok(expr) = parser.parse_expression()
-                && parser.is_complete()
-            {
-                compiler.compile_expression(&expr).unwrap();
-                compiler.get_result()
-            } else {
-                // Fallback to statements
-                parser.reset();
-                let program = parser.parse_program().map_err(map_parse_error)?;
-                compiler.compile(&program).unwrap()
-            }
-        }
-    };
-
-    vm.run_script(&result.bytecode, &result.constants)
-        .map_err(|e| ReplError::Other(e.to_string()))?;
-
-    Ok(vm.pop().unwrap_or(JsValue::Undefined))
 }

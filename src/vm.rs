@@ -886,4 +886,23 @@ impl Vm {
     pub fn pop(&mut self) -> Option<JsValue> {
         self.stack.pop()
     }
+
+    pub fn get_global_idents(&self) -> Vec<String> {
+        self.heap
+            .get_object(&self.global_obj)
+            .properties
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    pub fn get_global_enumerable_idents(&self) -> Vec<String> {
+        self.heap
+            .get_object(&self.global_obj)
+            .properties
+            .iter()
+            .filter(|(_, v)| v.enumerable)
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
 }
