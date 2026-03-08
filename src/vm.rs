@@ -508,6 +508,7 @@ impl Vm {
                         (JsValue::Boolean(a), JsValue::Boolean(b)) => a == b,
                         (JsValue::Null, JsValue::Null) => true,
                         (JsValue::Undefined, JsValue::Undefined) => true,
+                        (JsValue::Object(a), JsValue::Object(b)) => a.index == b.index,
                         _ => false,
                     })?;
                 }
