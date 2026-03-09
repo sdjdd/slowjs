@@ -9,7 +9,7 @@ use slowjs::vm::Vm;
 
 mod editor;
 
-use crate::repl::editor::{Editor, EditorContext, EditorEventHandler};
+use crate::repl::editor::{Editor, EditorContext, EditorError, EditorEventHandler};
 
 enum ReplError {
     ImcompleteInput,
@@ -20,6 +20,7 @@ struct Repl {
     compiler: Compiler,
     vm: Vm,
     input_buffer: String,
+    ctrl_c_count: usize,
 }
 
 impl Repl {
@@ -28,6 +29,7 @@ impl Repl {
             compiler: Compiler::new(),
             vm: Vm::new(),
             input_buffer: String::new(),
+            ctrl_c_count: 0,
         }
     }
 
@@ -95,7 +97,17 @@ impl Repl {
 }
 
 impl EditorEventHandler for Repl {
+    fn get_prompt(&self) -> &str {
+        if self.input_buffer.is_empty() {
+            "> "
+        } else {
+            "... "
+        }
+    }
+
     fn handle_input(&mut self, line: String, ctx: &mut EditorContext) {
+        self.ctrl_c_count = 0;
+
         let input = line.trim();
 
         if input == ".exit" {
@@ -120,15 +132,38 @@ impl EditorEventHandler for Repl {
                     }
                 };
 
-                ctx.set_prompt("> ".to_string());
                 self.input_buffer.clear();
             }
             Err(ReplError::ImcompleteInput) => {
                 self.input_buffer.push('\n');
-                ctx.set_prompt("... ".to_string());
             }
             Err(ReplError::Other(e)) => {
                 println!("Error: {e}");
+                self.input_buffer.clear();
+            }
+        }
+    }
+
+    fn handle_error(&mut self, err: editor::EditorError, ctx: &mut EditorContext) {
+        match err {
+            EditorError::Interrupt(line) => {
+                self.input_buffer.clear();
+                if line.is_empty() {
+                    self.ctrl_c_count += 1;
+                    if self.ctrl_c_count > 1 {
+                        ctx.exit();
+                    } else {
+                        println!("(To exit, press Ctrl+C again or Ctrl+D or type .exit)");
+                    }
+                } else {
+                    self.ctrl_c_count = 0;
+                }
+            }
+            EditorError::Eof => {
+                ctx.exit();
+            }
+            EditorError::Io(e) => {
+                panic!("{}", e);
             }
         }
     }

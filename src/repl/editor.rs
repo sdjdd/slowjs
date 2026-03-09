@@ -1,22 +1,15 @@
 use std::io::Write;
 
 use console::{Key, Term, style};
+use thiserror::Error;
 
 pub struct EditorContext {
-    prompt: Option<String>,
     should_exit: bool,
 }
 
 impl EditorContext {
     fn new() -> Self {
-        Self {
-            prompt: None,
-            should_exit: false,
-        }
-    }
-
-    pub fn set_prompt(&mut self, prompt: String) {
-        self.prompt = Some(prompt);
+        Self { should_exit: false }
     }
 
     pub fn exit(&mut self) {
@@ -27,16 +20,31 @@ impl EditorContext {
 pub trait EditorEventHandler {
     fn handle_input(&mut self, line: String, ctx: &mut EditorContext);
 
+    fn handle_error(&mut self, err: EditorError, ctx: &mut EditorContext);
+
     fn handle_hint(&mut self, input: String) -> Option<Vec<String>>;
 
     fn handle_completion(&mut self, input: String) -> Option<Vec<String>>;
+
+    fn get_prompt(&self) -> &str {
+        "> "
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum EditorError {
+    #[error("Interrupt")]
+    Interrupt(String),
+    #[error("EOF")]
+    Eof,
+    #[error("IO Error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 pub struct Editor {
     term: Term,
     buffer: Vec<char>,
     buffer_pos: usize,
-    prompt: String,
 
     current_hint: Option<String>,
     hide_hint: bool,
@@ -54,7 +62,6 @@ impl Editor {
             term: Term::stdout(),
             buffer: Vec::new(),
             buffer_pos: 0,
-            prompt: "> ".to_string(),
             current_hint: None,
             hide_hint: false,
             no_hint_count: 0,
@@ -71,7 +78,7 @@ impl Editor {
 
     fn redraw_line(&self) -> Result<(), std::io::Error> {
         self.term.clear_line()?;
-        write!(&self.term, "{}", self.prompt)?;
+        write!(&self.term, "{}", self.handler.get_prompt())?;
         let line = self.get_buffer_string();
         write!(&self.term, "{}", line)?;
         if let Some(hint) = &self.current_hint {
@@ -91,31 +98,24 @@ impl Editor {
 
     pub fn read_lines(&mut self) {
         loop {
+            let mut ctx = EditorContext::new();
             match self.read_line() {
-                Ok(exit) => {
+                Ok(_) => {
                     let line = self.get_buffer_string();
                     if !line.trim().is_empty() {
-                        self.history.push(line.clone());
-                        self.history_pos = self.history.len();
-                    }
-                    if exit {
-                        break;
-                    }
-                    if !self.buffer.is_empty() {
-                        let mut ctx = EditorContext::new();
-                        self.handler.handle_input(line, &mut ctx);
-                        if let Some(prompt) = ctx.prompt {
-                            self.prompt = prompt;
-                        }
-                        if ctx.should_exit {
-                            break;
+                        if self.history.is_empty() || self.history.last().unwrap().ne(&line) {
+                            self.history.push(line.clone());
+                            self.history_pos = self.history.len();
                         }
                     }
+                    self.handler.handle_input(line, &mut ctx);
                 }
                 Err(err) => {
-                    eprintln!("{}", err);
-                    break;
+                    self.handler.handle_error(err, &mut ctx);
                 }
+            }
+            if ctx.should_exit {
+                break;
             }
         }
     }
@@ -134,34 +134,28 @@ impl Editor {
         Ok(())
     }
 
-    fn apply_hint(&mut self) -> Result<(), std::io::Error> {
+    fn apply_hint(&mut self, show_completion: bool) -> Result<(), std::io::Error> {
         if let Some(hint) = &self.current_hint {
             self.buffer.extend(hint.chars());
             self.buffer_pos = self.buffer.len();
             self.current_hint = None;
-        } else {
+        } else if show_completion {
             self.no_hint_count += 1;
             let line = self.get_buffer_string();
-            if let Some(completions) = self.handler.handle_completion(line)
+            if let Some(mut completions) = self.handler.handle_completion(line)
                 && !completions.is_empty()
             {
-                for (i, completion) in completions.iter().enumerate() {
-                    if i > 0 {
-                        write!(self.term, " ")?;
-                    }
-                    write!(self.term, "{}", completion)?;
-                }
+                self.redraw_line()?;
                 write!(self.term, "\n")?;
+                completions.sort();
+                self.print_items(&completions)?;
+                write!(self.term, "\n\n")?;
             }
         }
         Ok(())
     }
 
-    fn read_line(&mut self) -> Result<bool, std::io::Error> {
-        let mut exit = false;
-
-        let prompt = "> ";
-        write!(self.term, "{}", prompt)?;
+    fn read_line(&mut self) -> Result<(), EditorError> {
         self.buffer.clear();
         self.buffer_pos = 0;
 
@@ -179,15 +173,13 @@ impl Editor {
                     if ch == '\u{4}' && self.buffer.is_empty() {
                         // Ctrl-D
                         println!();
-                        exit = true;
-                        break;
+                        return Err(EditorError::Eof);
                     }
                     if ch == '\u{c}' {
                         // Ctrl-L
                         self.term.clear_screen()?;
                         write!(self.term, "\x1B[3J")?; // Clear the scrollback buffer
-                        write!(self.term, "{}", prompt)?;
-                        self.buffer_pos = 0;
+                        write!(self.term, "{}", self.handler.get_prompt())?;
                     }
                     if ch == '\u{15}' {
                         // Ctrl-U
@@ -211,9 +203,10 @@ impl Editor {
                 }
                 Key::CtrlC => {
                     println!();
+                    let line = self.get_buffer_string();
                     self.buffer.clear();
                     self.buffer_pos = 0;
-                    break;
+                    return Err(EditorError::Interrupt(line));
                 }
                 Key::Backspace => {
                     if self.buffer_pos > 0 {
@@ -230,7 +223,7 @@ impl Editor {
                     if self.buffer_pos < self.buffer.len() {
                         self.buffer_pos += 1;
                     } else {
-                        self.apply_hint()?;
+                        self.apply_hint(false)?;
                     }
                 }
                 Key::ArrowUp => {
@@ -253,10 +246,10 @@ impl Editor {
                 }
                 Key::Enter => {
                     write!(self.term, "\n")?;
-                    return Ok(false);
+                    break;
                 }
                 Key::Tab => {
-                    self.apply_hint()?;
+                    self.apply_hint(true)?;
                 }
                 Key::Escape => {
                     self.current_hint = None;
@@ -266,7 +259,7 @@ impl Editor {
             }
         }
 
-        Ok(exit)
+        Ok(())
     }
 
     fn search_history(&mut self) -> Option<String> {
@@ -283,6 +276,31 @@ impl Editor {
             return Some(self.history[self.history_pos].clone());
         }
         None
+    }
+
+    fn print_items<'a>(&self, items: &'a [String]) -> Result<(), std::io::Error> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let longest_width = items
+            .iter()
+            .map(|s| console::measure_text_width(s))
+            .max()
+            .unwrap();
+        let columns = self.term.size().1 as usize;
+        let count_per_row = std::cmp::max(columns / (longest_width + 2), 1);
+        for (i, item) in items.iter().enumerate() {
+            if i % count_per_row == 0 {
+                write!(&self.term, "\n")?;
+            }
+            write!(&self.term, "{}", item)?;
+            write!(
+                &self.term,
+                "{}  ",
+                " ".repeat(longest_width - console::measure_text_width(item))
+            )?;
+        }
+        Ok(())
     }
 }
 
