@@ -37,10 +37,15 @@ pub struct Editor {
     buffer: Vec<char>,
     buffer_pos: usize,
     prompt: String,
+
     current_hint: Option<String>,
     hide_hint: bool,
     no_hint_count: usize,
+
     handler: Box<dyn EditorEventHandler>,
+
+    history: Vec<String>,
+    history_pos: usize,
 }
 
 impl Editor {
@@ -54,6 +59,8 @@ impl Editor {
             hide_hint: false,
             no_hint_count: 0,
             handler,
+            history: Vec::new(),
+            history_pos: 0,
         }
     }
 
@@ -85,14 +92,18 @@ impl Editor {
     pub fn read_lines(&mut self) {
         loop {
             match self.read_line() {
-                Ok(true) => {
-                    break;
-                }
-                Ok(false) => {
+                Ok(exit) => {
+                    let line = self.get_buffer_string();
+                    if !line.trim().is_empty() {
+                        self.history.push(line.clone());
+                        self.history_pos = self.history.len();
+                    }
+                    if exit {
+                        break;
+                    }
                     if !self.buffer.is_empty() {
                         let mut ctx = EditorContext::new();
-                        self.handler
-                            .handle_input(self.get_buffer_string(), &mut ctx);
+                        self.handler.handle_input(line, &mut ctx);
                         if let Some(prompt) = ctx.prompt {
                             self.prompt = prompt;
                         }
@@ -222,6 +233,18 @@ impl Editor {
                         self.apply_hint()?;
                     }
                 }
+                Key::ArrowUp => {
+                    self.search_history().map(|content| {
+                        self.buffer = content.chars().collect();
+                        self.buffer_pos = self.buffer.len();
+                    });
+                }
+                Key::ArrowDown => {
+                    self.search_history_rev().map(|content| {
+                        self.buffer = content.chars().collect();
+                        self.buffer_pos = self.buffer.len();
+                    });
+                }
                 Key::Home => {
                     self.buffer_pos = 0;
                 }
@@ -244,6 +267,22 @@ impl Editor {
         }
 
         Ok(exit)
+    }
+
+    fn search_history(&mut self) -> Option<String> {
+        if self.history_pos > 0 {
+            self.history_pos -= 1;
+            return Some(self.history[self.history_pos].clone());
+        }
+        None
+    }
+
+    fn search_history_rev(&mut self) -> Option<String> {
+        if self.history_pos < self.history.len() - 1 {
+            self.history_pos += 1;
+            return Some(self.history[self.history_pos].clone());
+        }
+        None
     }
 }
 
