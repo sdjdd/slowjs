@@ -404,6 +404,9 @@ impl Vm {
             (OpCode::Add, JsValue::String(a), JsValue::String(b)) => {
                 JsValue::String(format!("{}{}", a, b))
             }
+            (OpCode::Add, JsValue::String(a), JsValue::Number(b)) => {
+                JsValue::String(format!("{}{}", a, b))
+            }
             (OpCode::Add, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a + *b),
             (OpCode::Sub, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a - *b),
             (OpCode::Mul, JsValue::Number(a), JsValue::Number(b)) => JsValue::Number(*a * *b),
