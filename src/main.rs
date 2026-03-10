@@ -48,6 +48,6 @@ fn run_script(input: &str) {
         .compile(&program)
         .expect("Failed to compile program");
 
-    vm.run_script(&result.bytecode, &result.constants)
+    vm.run_script(&result.bytecode, &result.constants, &result.exception_table)
         .expect("Failed to run script");
 }

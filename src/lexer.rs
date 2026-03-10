@@ -28,6 +28,10 @@ pub enum TokenKind {
     Return,
     New,
     This,
+    Throw,
+    Try,
+    Catch,
+    Finally,
 
     // Operators
     Plus,  // +
@@ -286,6 +290,10 @@ impl Lexer {
                 "return" => TokenKind::Return,
                 "new" => TokenKind::New,
                 "this" => TokenKind::This,
+                "throw" => TokenKind::Throw,
+                "try" => TokenKind::Try,
+                "catch" => TokenKind::Catch,
+                "finally" => TokenKind::Finally,
                 "instanceof" => TokenKind::Instanceof,
                 _ => TokenKind::Ident(ident.to_string()),
             }

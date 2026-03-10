@@ -2,14 +2,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::rc::Rc;
+use std::usize;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
 use crate::js_std;
 use crate::runtime::{
-    self, CodeBlock, ConstantTable, FunctionBody, Gc, JsFunction, JsObject, JsValue, NativeFnCtx,
-    PropertyDescriptor,
+    self, CodeBlock, ConstantTable, ExceptionHandler, FunctionBody, Gc, JsFunction, JsObject,
+    JsValue, NativeFnCtx, PropertyDescriptor,
 };
 
 #[derive(Clone, PartialEq, Eq)]
@@ -39,24 +40,42 @@ pub struct FunctionTemplate {
 
 pub type ConstantPool = Vec<Constant>;
 
+struct PendingException {
+    throw_addr: usize,
+    value: JsValue,
+}
+
 struct CallFrame {
     base: usize,
     ip: usize,
     code: Rc<CodeBlock>,
     env: Rc<RefCell<Env>>,
+
     this_value: JsValue,
+    return_value: Option<JsValue>,
+    end_addr: usize,
+
     is_constructor: bool,
+
+    /// Throwed value in catch block, should be re-thrown on finally end.
+    pending_exception: Option<PendingException>,
+    active_handler: Option<usize>,
 }
 
 impl CallFrame {
     pub fn new(code: Rc<CodeBlock>, env: Rc<RefCell<Env>>) -> Self {
+        let end_addr = code.code.len() - 1;
         Self {
             base: 0,
             ip: 0,
             code,
             env,
             this_value: JsValue::Undefined,
+            return_value: None,
+            end_addr,
             is_constructor: false,
+            pending_exception: None,
+            active_handler: None,
         }
     }
 
@@ -96,6 +115,8 @@ pub enum RuntimeError {
     SyntaxError(String),
     #[error("Type error: {0}")]
     TypeError(String),
+    #[error("Uncaught exception: {0:?}")]
+    UncaughtException(JsValue),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
@@ -128,6 +149,7 @@ pub enum OpCode {
     Pop,
 
     Halt,
+    Nop,
 
     PushConstant,
     GetLocal,
@@ -183,6 +205,9 @@ pub enum OpCode {
 
     /// Stack: `[object, constructor]` -> `[boolean]`
     InstanceOf,
+
+    /// Throw exception. Stack: `[value]` -> `[]`
+    Throw,
 }
 
 // ============ Abstract Operations for Relational Comparison ============
@@ -437,6 +462,7 @@ impl Vm {
         &mut self,
         bytecode: &[u8],
         constants: &ConstantPool,
+        exception_table: &[ExceptionHandler],
     ) -> Result<(), RuntimeError> {
         let env = match self.frames.last() {
             Some(frame) => frame.env.clone(),
@@ -450,6 +476,7 @@ impl Vm {
             Rc::new(CodeBlock {
                 code: bytecode.to_vec(),
                 constants: ConstantTable::new(constants.clone()),
+                exception_table: exception_table.to_vec(),
             }),
             env,
         );
@@ -459,12 +486,81 @@ impl Vm {
         self.run_loop()
     }
 
+    fn handle_throw(&mut self, mut ip: usize, value: JsValue) -> Result<(), RuntimeError> {
+        loop {
+            if self.frames.is_empty() {
+                return Err(RuntimeError::UncaughtException(value));
+            }
+
+            let frame = self.frames.last_mut().unwrap();
+
+            if let Some(handler_idx) = frame.active_handler.take() {
+                let handler = frame.code.exception_table[handler_idx];
+                // Check if still in active handler
+                if ip >= handler.try_start && ip <= handler.try_end {
+                    if handler.finally_start > 0 {
+                        frame.pending_exception = Some(PendingException {
+                            throw_addr: handler.finally_end + 1,
+                            value,
+                        });
+                        frame.ip = handler.finally_start;
+                        return Ok(());
+                    }
+                }
+            }
+
+            let handler_idx = frame.code.find_exception_handler(ip);
+
+            if let Some(handler_idx) = handler_idx {
+                let frame = self.frames.last_mut().unwrap();
+                let handler = &frame.code.exception_table[handler_idx];
+
+                frame.active_handler = Some(handler_idx);
+
+                if handler.catch_start > 0 {
+                    frame.ip = handler.catch_start;
+                    self.stack.push(value);
+                    return Ok(());
+                }
+                if handler.finally_start > 0 {
+                    frame.pending_exception = Some(PendingException {
+                        throw_addr: handler.finally_end + 1,
+                        value,
+                    });
+                    frame.ip = handler.finally_start;
+                    return Ok(());
+                }
+            }
+
+            if let Some(frame) = self.frames.pop() {
+                self.stack.truncate(frame.base);
+            }
+
+            self.frames.last().map(|frame| ip = frame.ip - 1);
+        }
+    }
+
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
         while let Some(frame) = self.frames.last_mut() {
-            if frame.ip >= frame.code.code.len() {
-                // No explicit return
-                self.stack.push(JsValue::Undefined);
-                self.end_current_frame();
+            if let Some(e) = &frame.pending_exception
+                && e.throw_addr == frame.ip
+            {
+                let e = frame.pending_exception.take().unwrap();
+                self.handle_throw(e.throw_addr, e.value)?;
+                continue;
+            }
+
+            if frame.ip >= frame.code.code.len() || frame.ip > frame.end_addr {
+                let frame = self.frames.pop().unwrap();
+                self.stack.truncate(frame.base);
+                let return_value = frame.return_value.unwrap_or(JsValue::Undefined);
+
+                if frame.is_constructor && !runtime::is_object(&return_value) {
+                    self.stack.push(frame.this_value);
+                } else {
+                    self.stack.push(return_value);
+                }
+
                 continue;
             }
 
@@ -560,6 +656,12 @@ impl Vm {
                 OpCode::Halt => {
                     break;
                 }
+                OpCode::Nop => {}
+                OpCode::Throw => {
+                    let value = self.stack.pop().unwrap();
+                    let ip = frame.ip - 1;
+                    self.handle_throw(ip, value)?;
+                }
                 OpCode::PushConstant => {
                     let value = frame.get_constant();
                     self.stack.push(value);
@@ -637,7 +739,26 @@ impl Vm {
                     self.handle_op_construct()?;
                 }
                 OpCode::Return => {
-                    self.end_current_frame();
+                    let handler = if let Some(handler_idx) = frame.active_handler {
+                        Some(&frame.code.exception_table[handler_idx])
+                    } else if let Some(handler_idx) =
+                        frame.code.find_exception_handler(frame.ip - 1)
+                    {
+                        Some(&frame.code.exception_table[handler_idx])
+                    } else {
+                        None
+                    };
+
+                    if let Some(handler) = handler
+                        && handler.finally_start > 0
+                    {
+                        frame.ip = handler.finally_start;
+                        frame.end_addr = handler.finally_end;
+                    } else {
+                        frame.end_addr = frame.ip - 1;
+                    }
+
+                    frame.return_value = self.stack.pop();
                 }
                 OpCode::Jump => {
                     frame.ip = frame.read_u16() as usize;
@@ -846,7 +967,11 @@ impl Vm {
                     code: code.clone(),
                     env,
                     this_value: this,
+                    return_value: None,
+                    end_addr: code.code.len() - 1,
                     is_constructor: false,
+                    pending_exception: None,
+                    active_handler: None,
                 })
             }
             FunctionBody::Native(native_fn) => {
@@ -870,19 +995,6 @@ impl Vm {
         }
 
         Ok(())
-    }
-
-    fn end_current_frame(&mut self) {
-        let frame = self.frames.pop().unwrap();
-        let return_value = self.stack.pop().unwrap();
-        self.stack.truncate(frame.base);
-
-        if frame.is_constructor && !runtime::is_object(&return_value) {
-            self.stack.push(frame.this_value);
-            return;
-        }
-
-        self.stack.push(return_value);
     }
 
     pub fn pop(&mut self) -> Option<JsValue> {

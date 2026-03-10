@@ -10,6 +10,8 @@ pub enum ParseError {
         expected: Option<TokenKind>,
         found: TokenKind,
     },
+    #[error("SyntaxError: {message}")]
+    SyntaxError { message: String },
     #[error(transparent)]
     Lexer(#[from] LexerError),
 }
@@ -150,7 +152,7 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.current() {
-            TokenKind::LBrace => self.parse_block_statement(),
+            TokenKind::LBrace => Ok(Statement::BlockStatement(self.parse_block_statement()?)),
             TokenKind::Var => self.parse_variable_statement(),
             TokenKind::Semi => {
                 self.advance();
@@ -161,11 +163,13 @@ impl Parser {
                 self.parse_function_declaration()?,
             ))),
             TokenKind::Return => Ok(Statement::ReturnStatement(self.parse_return_statement()?)),
+            TokenKind::Throw => Ok(Statement::ThrowStatement(self.parse_throw_statement()?)),
+            TokenKind::Try => Ok(Statement::TryStatement(self.parse_try_statement()?)),
             _ => self.parse_expression_statement(),
         }
     }
 
-    fn parse_block_statement(&mut self) -> Result<Statement, ParseError> {
+    fn parse_block_statement(&mut self) -> Result<BlockStatement, ParseError> {
         let start_pos = self.current_loc().start;
         self.expect(TokenKind::LBrace)?;
 
@@ -178,10 +182,10 @@ impl Parser {
         let end_pos = self.current_loc().end;
         self.expect(TokenKind::RBrace)?;
 
-        Ok(Statement::BlockStatement(BlockStatement {
+        Ok(BlockStatement {
             body,
             loc: Some(SourceLocation::new(start_pos, end_pos)),
-        }))
+        })
     }
 
     fn parse_variable_statement(&mut self) -> Result<Statement, ParseError> {
@@ -836,6 +840,92 @@ impl Parser {
 
         Ok(ReturnStatement {
             argument: Some(argument),
+            loc: Some(loc),
+        })
+    }
+
+    fn parse_throw_statement(&mut self) -> Result<ThrowStatement, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::Throw)?;
+
+        if self.prev_had_line_break() {
+            return Err(ParseError::SyntaxError {
+                message: "Illegal newline after throw".to_string(),
+            });
+        }
+
+        let argument = self.parse_expression()?;
+        loc.end = self.current_loc().end;
+        self.expect(TokenKind::Semi)?;
+
+        Ok(ThrowStatement {
+            argument,
+            loc: Some(loc),
+        })
+    }
+
+    fn parse_try_statement(&mut self) -> Result<TryStatement, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::Try)?;
+
+        let block = self.parse_block_statement()?;
+
+        let handler = if matches!(self.current(), TokenKind::Catch) {
+            Some(self.parse_catch_clause()?)
+        } else {
+            None
+        };
+
+        let finalizer = if matches!(self.current(), TokenKind::Finally) {
+            self.advance();
+            Some(self.parse_block_statement()?)
+        } else {
+            None
+        };
+
+        loc.end = self.current_loc().end;
+
+        if handler.is_none() && finalizer.is_none() {
+            return Err(ParseError::SyntaxError {
+                message: " Missing catch or finally after try".to_string(),
+            });
+        }
+
+        Ok(TryStatement {
+            block,
+            handler,
+            finalizer,
+            loc: Some(loc),
+        })
+    }
+
+    fn parse_catch_clause(&mut self) -> Result<CatchClause, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::Catch)?;
+        self.expect(TokenKind::LParen)?;
+
+        let param = match self.current() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                let param_loc = self.current_loc();
+                self.advance();
+                Pattern::Identifier(Identifier {
+                    name,
+                    loc: Some(param_loc),
+                })
+            }
+            _ => return Err(self.unexpected()),
+        };
+
+        self.expect(TokenKind::RParen)?;
+
+        let body = self.parse_block_statement()?;
+
+        loc.end = self.current_loc().end;
+
+        Ok(CatchClause {
+            param,
+            body,
             loc: Some(loc),
         })
     }

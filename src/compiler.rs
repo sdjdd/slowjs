@@ -3,7 +3,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 use crate::ast::*;
-use crate::runtime::{CodeBlock, ConstantTable};
+use crate::runtime::{CodeBlock, ConstantTable, ExceptionHandler};
 use crate::vm::{Constant, ConstantPool, FunctionTemplate, OpCode};
 
 #[derive(Debug, Error)]
@@ -12,6 +12,7 @@ pub enum CompilerError {}
 pub struct Compiler {
     bytecode: Vec<u8>,
     constants: ConstantPool,
+    exception_table: Vec<ExceptionHandler>,
 
     handle_directives: bool,
 }
@@ -21,12 +22,14 @@ impl Compiler {
         Self {
             bytecode: Vec::new(),
             constants: Vec::new(),
+            exception_table: Vec::new(),
             handle_directives: true,
         }
     }
 
     pub fn reset(&mut self) {
         self.bytecode.clear();
+        self.exception_table.clear();
     }
 
     fn add_constant(&mut self, value: Constant) -> usize {
@@ -72,6 +75,7 @@ impl Compiler {
         CompileResult {
             bytecode: self.bytecode.clone(),
             constants: self.constants.clone(),
+            exception_table: self.exception_table.clone(),
         }
     }
 
@@ -126,6 +130,8 @@ impl Compiler {
             Statement::ReturnStatement(stmt) => self.compile_return_statement(stmt)?,
             Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
             Statement::IfStatement(stmt) => self.compile_if_statement(stmt)?,
+            Statement::ThrowStatement(stmt) => self.compile_throw_statement(stmt)?,
+            Statement::TryStatement(stmt) => self.compile_try_statement(stmt)?,
         };
         Ok(())
     }
@@ -502,6 +508,7 @@ impl Compiler {
             code_block: Rc::new(CodeBlock {
                 code: bytecode,
                 constants: ConstantTable::new(compiler.constants),
+                exception_table: compiler.exception_table,
             }),
         };
 
@@ -553,9 +560,73 @@ impl Compiler {
         self.emit(OpCode::Return);
         Ok(())
     }
+
+    fn compile_throw_statement(&mut self, stmt: &ThrowStatement) -> Result<(), CompilerError> {
+        self.compile_expression(&stmt.argument)?;
+        self.emit(OpCode::Throw);
+        Ok(())
+    }
+
+    fn compile_try_statement(&mut self, stmt: &TryStatement) -> Result<(), CompilerError> {
+        let mut exception_handler = ExceptionHandler {
+            try_start: 0,
+            try_end: 0,
+            catch_start: 0,
+            finally_start: 0,
+            finally_end: 0,
+        };
+
+        exception_handler.try_start = self.bytecode.len();
+        self.compile_block_statement(&stmt.block)?;
+        exception_handler.try_end = self.bytecode.len() - 1;
+
+        if exception_handler.try_end < exception_handler.try_start {
+            exception_handler.try_end = self.emit(OpCode::Nop);
+        }
+
+        self.emit(OpCode::Jump);
+        let jump_offset = self.emit_u16(0);
+
+        if let Some(handler) = &stmt.handler {
+            exception_handler.catch_start = self.bytecode.len();
+
+            // catch(param)
+            let param_name = match &handler.param {
+                Pattern::Identifier(id) => &id.name,
+            };
+            let param_idx = self.add_constant(Constant::String(param_name.clone()));
+            self.emit(OpCode::DeclareVar);
+            self.emit_u16(param_idx as u16);
+            self.emit(OpCode::SetVar);
+            self.emit_u16(param_idx as u16);
+
+            self.compile_block_statement(&handler.body)?;
+        }
+
+        if let Some(finalizer) = &stmt.finalizer {
+            exception_handler.finally_start = self.bytecode.len();
+            self.compile_block_statement(finalizer)?;
+            exception_handler.finally_end = self.bytecode.len() - 1;
+            if exception_handler.finally_end < exception_handler.finally_start {
+                exception_handler.finally_end = self.emit(OpCode::Nop);
+            }
+        }
+
+        let jump_target = if stmt.finalizer.is_some() {
+            exception_handler.finally_start
+        } else {
+            self.bytecode.len()
+        };
+        self.write_u16(jump_offset, jump_target as u16);
+
+        self.exception_table.push(exception_handler);
+
+        Ok(())
+    }
 }
 
 pub struct CompileResult {
     pub bytecode: Vec<u8>,
     pub constants: ConstantPool,
+    pub exception_table: Vec<ExceptionHandler>,
 }

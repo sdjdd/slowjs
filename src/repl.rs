@@ -69,7 +69,7 @@ impl Repl {
         };
 
         self.vm
-            .run_script(&result.bytecode, &result.constants)
+            .run_script(&result.bytecode, &result.constants, &result.exception_table)
             .map_err(|e| ReplError::Other(e.to_string()))?;
 
         Ok(self.vm.pop().unwrap_or(JsValue::Undefined))

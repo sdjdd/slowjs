@@ -86,6 +86,8 @@ pub enum Statement {
     Declaration(Declaration),
     IfStatement(IfStatement),
     ReturnStatement(ReturnStatement),
+    ThrowStatement(ThrowStatement),
+    TryStatement(TryStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -279,6 +281,27 @@ pub enum Pattern {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnStatement {
     pub argument: Option<Expression>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThrowStatement {
+    pub argument: Expression,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TryStatement {
+    pub block: BlockStatement,
+    pub handler: Option<CatchClause>,
+    pub finalizer: Option<BlockStatement>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatchClause {
+    pub param: Pattern,
+    pub body: BlockStatement,
     pub loc: Option<SourceLocation>,
 }
 
