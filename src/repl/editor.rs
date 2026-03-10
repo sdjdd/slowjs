@@ -278,7 +278,7 @@ impl Editor {
         None
     }
 
-    fn print_items<'a>(&self, items: &'a [String]) -> Result<(), std::io::Error> {
+    fn print_items(&self, items: &[String]) -> Result<(), std::io::Error> {
         if items.is_empty() {
             return Ok(());
         }
@@ -291,7 +291,7 @@ impl Editor {
         let count_per_row = std::cmp::max(columns / (longest_width + 2), 1);
         for (i, item) in items.iter().enumerate() {
             if i % count_per_row == 0 {
-                write!(&self.term, "\n")?;
+                writeln!(&self.term)?;
             }
             write!(&self.term, "{}", item)?;
             write!(
@@ -313,14 +313,14 @@ fn common_prefix<'a>(s1: &'a str, s2: &'a str) -> &'a str {
     &s1[..len]
 }
 
-fn longest_common_prefix<'a>(strings: &'a [String]) -> &'a str {
+fn longest_common_prefix(strings: &[String]) -> &str {
     if strings.is_empty() {
         return "";
     }
 
     let mut prefix: &str = &strings[0];
     for s in strings.iter().skip(1) {
-        prefix = common_prefix(&prefix, s);
+        prefix = common_prefix(prefix, s);
     }
     prefix
 }
