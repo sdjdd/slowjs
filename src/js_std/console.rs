@@ -49,7 +49,7 @@ fn print_function(f: &JsFunction) {
     print!("{}", format!("[Function: {}]", f.name).cyan())
 }
 
-fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut ObjectRefCounter) {
+fn print_object(heap: &Heap, obj: &Gc<JsObject>, indent: usize, counter: &mut ObjectRefCounter) {
     let ptr = obj.index;
     let obj = heap.get_object(obj);
 
@@ -69,10 +69,7 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
         if !v.enumerable {
             continue;
         }
-        for _ in 0..depth {
-            print!("  ");
-        }
-        print!("  {}: ", k);
+        print!("{}  {}: ", "  ".repeat(indent), k);
         match &v.value {
             JsValue::Object(o) => {
                 let ptr = o.index;
@@ -82,23 +79,20 @@ fn print_object(heap: &Heap, obj: &Gc<JsObject>, depth: usize, counter: &mut Obj
                         format!("[Circular *{}]", counter.ref_ids.get(&ptr).unwrap()).cyan()
                     );
                 } else {
-                    print_object(heap, o, depth + 1, counter);
+                    print_object(heap, o, indent + 1, counter);
                 }
             }
             JsValue::String(s) => print!("{}", format!("'{}'", s).green()),
-            _ => print_with_depth(heap, &v.value, depth + 1),
+            _ => print_with_indent(heap, &v.value, indent + 1),
         };
         println!(",");
     }
-    for _ in 0..depth {
-        print!("  ");
-    }
-    print!("}}");
+    print!("{}}}", "  ".repeat(indent));
 
     counter.visited.remove(&ptr);
 }
 
-fn print_with_depth(heap: &Heap, value: &JsValue, depth: usize) {
+fn print_with_indent(heap: &Heap, value: &JsValue, indent: usize) {
     match value {
         JsValue::Null => print!("{}", "null".white()),
         JsValue::Undefined => print!("{}", "undefined".dimmed()),
@@ -125,7 +119,7 @@ fn print_with_depth(heap: &Heap, value: &JsValue, depth: usize) {
             let mut counter = ObjectRefCounter::new(heap);
             counter.count(o);
             counter.visited.clear();
-            print_object(heap, o, depth, &mut counter);
+            print_object(heap, o, indent, &mut counter);
         }
         JsValue::Function(f) => {
             let func = heap.get_func(f);
@@ -145,7 +139,7 @@ fn console_log(ctx: &mut NativeFnCtx) {
 }
 
 pub fn print(heap: &Heap, value: &JsValue) {
-    print_with_depth(heap, value, 0);
+    print_with_indent(heap, value, 0);
 }
 
 pub fn new_console_object(heap: &mut Heap) -> JsValue {
