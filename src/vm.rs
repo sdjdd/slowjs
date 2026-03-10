@@ -41,8 +41,17 @@ pub struct FunctionTemplate {
 pub type ConstantPool = Vec<Constant>;
 
 struct PendingException {
-    throw_addr: usize,
+    next_throw_addr: usize,
     value: JsValue,
+}
+
+impl PendingException {
+    pub fn new(next_throw_addr: usize, value: JsValue) -> Self {
+        Self {
+            next_throw_addr,
+            value,
+        }
+    }
 }
 
 struct CallFrame {
@@ -498,11 +507,9 @@ impl Vm {
                 let handler = frame.code.exception_table[handler_idx];
                 // Check if still in active handler
                 if ip >= handler.try_start && ip <= handler.try_end {
-                    if handler.finally_start > 0 {
-                        frame.pending_exception = Some(PendingException {
-                            throw_addr: handler.finally_end + 1,
-                            value,
-                        });
+                    if handler.has_finally() {
+                        frame.pending_exception =
+                            Some(PendingException::new(handler.finally_end + 1, value));
                         frame.ip = handler.finally_start;
                         return Ok(());
                     }
@@ -517,17 +524,15 @@ impl Vm {
 
                 frame.active_handler = Some(handler_idx);
 
-                if handler.catch_start > 0 {
+                if handler.has_catch() {
                     frame.ip = handler.catch_start;
                     self.stack.push(value);
                     return Ok(());
                 }
-                if handler.finally_start > 0 {
-                    frame.pending_exception = Some(PendingException {
-                        throw_addr: handler.finally_end + 1,
-                        value,
-                    });
+                if handler.has_finally() {
                     frame.ip = handler.finally_start;
+                    frame.pending_exception =
+                        Some(PendingException::new(handler.finally_end + 1, value));
                     return Ok(());
                 }
             }
@@ -543,10 +548,10 @@ impl Vm {
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
         while let Some(frame) = self.frames.last_mut() {
             if let Some(e) = &frame.pending_exception
-                && e.throw_addr == frame.ip
+                && e.next_throw_addr == frame.ip
             {
                 let e = frame.pending_exception.take().unwrap();
-                self.handle_throw(e.throw_addr, e.value)?;
+                self.handle_throw(e.next_throw_addr, e.value)?;
                 continue;
             }
 
@@ -750,7 +755,7 @@ impl Vm {
                     };
 
                     if let Some(handler) = handler
-                        && handler.finally_start > 0
+                        && handler.has_finally()
                     {
                         frame.ip = handler.finally_start;
                         frame.end_addr = handler.finally_end;

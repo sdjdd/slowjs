@@ -146,6 +146,16 @@ pub struct ExceptionHandler {
     pub finally_end: usize,
 }
 
+impl ExceptionHandler {
+    pub fn has_catch(&self) -> bool {
+        self.catch_start > 0
+    }
+
+    pub fn has_finally(&self) -> bool {
+        self.finally_start > 0
+    }
+}
+
 pub struct NativeFnCtx<'a> {
     pub heap: &'a mut Heap,
     pub args: &'a [JsValue],
