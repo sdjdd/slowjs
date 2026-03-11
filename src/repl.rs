@@ -124,7 +124,7 @@ impl EditorEventHandler for Repl {
             Ok(value) => {
                 match value {
                     JsValue::String(s) => {
-                        println!("{}", format!("'{s}'").green());
+                        print_string(&s);
                     }
                     _ => {
                         console::print(&self.vm.heap, &value);
@@ -194,4 +194,29 @@ fn map_parse_error(e: ParseError) -> ReplError {
         } => ReplError::ImcompleteInput,
         e => ReplError::Other(e.to_string()),
     }
+}
+
+fn print_string(s: &str) {
+    use std::fmt::Write;
+
+    let mut buffer = String::from("'");
+    for ch in s.chars() {
+        if ch.is_control() {
+            match ch {
+                '\n' => buffer.push_str("\\n"),
+                '\r' => buffer.push_str("\\r"),
+                '\t' => buffer.push_str("\\t"),
+                _ => {
+                    write!(&mut buffer, "\\x{:02X}", ch as u32).unwrap();
+                }
+            }
+        } else {
+            match ch {
+                '\\' => buffer.push_str("\\\\"),
+                _ => buffer.push(ch),
+            }
+        }
+    }
+    buffer.push('\'');
+    println!("{}", buffer.green());
 }

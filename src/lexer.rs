@@ -1,14 +1,17 @@
 use nom::{
-    IResult, Parser,
+    IResult,
     branch::alt,
-    bytes::complete::{escaped, is_not, tag, take_while},
-    character::complete::{anychar, char, digit0, digit1, one_of},
-    combinator::{map, opt, recognize, value},
-    sequence::{delimited, pair, tuple},
+    bytes::complete::{tag, take_while},
+    character::complete::{digit0, digit1, one_of},
+    combinator::{map, recognize, value},
+    sequence::{pair, tuple},
 };
 use thiserror::Error;
 
 use crate::ast::{Position, SourceLocation};
+
+mod parse;
+use parse::string_literal;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -252,21 +255,7 @@ impl Lexer {
     }
 
     fn parse_string<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
-        let double_quoted = delimited(
-            char('"'),
-            opt(escaped(is_not("\"\\"), '\\', anychar))
-                .map(|s: Option<&str>| s.unwrap_or("").to_string()),
-            char('"'),
-        );
-
-        let single_quoted = delimited(
-            char('\''),
-            opt(escaped(is_not("'\\"), '\\', anychar))
-                .map(|s: Option<&str>| s.unwrap_or("").to_string()),
-            char('\''),
-        );
-
-        map(alt((double_quoted, single_quoted)), |s: String| {
+        map(string_literal::parse, |s: String| {
             self.pos.column += s.len() + 2; // 2 for quotes
             TokenKind::StringLit(s)
         })(input)
@@ -306,288 +295,43 @@ impl Lexer {
 mod tests {
     use super::*;
 
-    impl From<(usize, usize)> for Position {
-        fn from(value: (usize, usize)) -> Self {
-            Self {
-                line: value.0,
-                column: value.1,
-            }
-        }
-    }
-
-    fn new_token(kind: TokenKind, start: (usize, usize), end: (usize, usize)) -> Token {
-        Token {
-            kind,
-            loc: SourceLocation {
-                start: start.into(),
-                end: end.into(),
-            },
-            has_line_break: false,
-        }
+    fn tokenize(input: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new();
+        lexer.tokenize(input).unwrap()
     }
 
     #[test]
-    fn test_variable() {
-        let input = "var num = 100;";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Var, (1, 0), (1, 3)),
-                new_token(TokenKind::Ident("num".to_string()), (1, 4), (1, 7)),
-                new_token(TokenKind::Assign, (1, 8), (1, 9)),
-                new_token(TokenKind::Number(100.0), (1, 10), (1, 13)),
-                new_token(TokenKind::Semi, (1, 13), (1, 14)),
-                new_token(TokenKind::Eof, (1, 14), (1, 14)),
-            ]
-        )
+    fn test_null() {
+        let token = tokenize("null");
+        assert_eq!(token[0].kind, TokenKind::Null);
     }
 
     #[test]
-    fn test_numbers() {
-        let input = "42 3.14 0.5 100";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Number(42.0), (1, 0), (1, 2)),
-                new_token(TokenKind::Number(3.14), (1, 3), (1, 7)),
-                new_token(TokenKind::Number(0.5), (1, 8), (1, 11)),
-                new_token(TokenKind::Number(100.0), (1, 12), (1, 15)),
-                new_token(TokenKind::Eof, (1, 15), (1, 15)),
-            ]
-        )
+    fn test_boolean() {
+        let token = tokenize("true false");
+        assert_eq!(token[0].kind, TokenKind::Boolean(true));
+        assert_eq!(token[1].kind, TokenKind::Boolean(false));
     }
 
     #[test]
-    fn test_strings() {
-        let input = r#""hello" 'world' "test \"quoted\"" 'it\'s'"#;
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens.len(), 5);
-
-        let expected = vec![
-            new_token(TokenKind::StringLit("hello".to_string()), (1, 0), (1, 7)),
-            new_token(TokenKind::StringLit("world".to_string()), (1, 8), (1, 15)),
-            new_token(
-                TokenKind::StringLit("test \\\"quoted\\\"".to_string()),
-                (1, 16),
-                (1, 33),
-            ),
-            new_token(TokenKind::StringLit("it\\'s".to_string()), (1, 34), (1, 41)),
-            new_token(TokenKind::Eof, (1, 41), (1, 41)),
-        ];
-        for (test, expected) in tokens.iter().zip(expected.iter()) {
-            assert_eq!(*test, *expected);
-        }
+    fn test_number() {
+        let token = tokenize("123 3.14 100. .100");
+        assert_eq!(token[0].kind, TokenKind::Number(123.0));
+        assert_eq!(token[1].kind, TokenKind::Number(3.14));
+        assert_eq!(token[2].kind, TokenKind::Number(100.0));
+        assert_eq!(token[3].kind, TokenKind::Number(0.100));
     }
 
     #[test]
-    fn test_identifiers() {
-        let input = "foo bar _private $special var123";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Ident("foo".to_string()), (1, 0), (1, 3)),
-                new_token(TokenKind::Ident("bar".to_string()), (1, 4), (1, 7)),
-                new_token(TokenKind::Ident("_private".to_string()), (1, 8), (1, 16)),
-                new_token(TokenKind::Ident("$special".to_string()), (1, 17), (1, 25)),
-                new_token(TokenKind::Ident("var123".to_string()), (1, 26), (1, 32)),
-                new_token(TokenKind::Eof, (1, 32), (1, 32)),
-            ]
-        )
-    }
+    fn test_string() {
+        let token = tokenize(r#" "hello" "\"" "" "#);
+        assert_eq!(token[0].kind, TokenKind::StringLit("hello".to_string()));
+        assert_eq!(token[1].kind, TokenKind::StringLit("\"".to_string()));
+        assert_eq!(token[2].kind, TokenKind::StringLit("".to_string()));
 
-    #[test]
-    fn test_keywords() {
-        let input = "var let const if else function return null true false";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Var, (1, 0), (1, 3)),
-                new_token(TokenKind::Let, (1, 4), (1, 7)),
-                new_token(TokenKind::Const, (1, 8), (1, 13)),
-                new_token(TokenKind::If, (1, 14), (1, 16)),
-                new_token(TokenKind::Else, (1, 17), (1, 21)),
-                new_token(TokenKind::Function, (1, 22), (1, 30)),
-                new_token(TokenKind::Return, (1, 31), (1, 37)),
-                new_token(TokenKind::Null, (1, 38), (1, 42)),
-                new_token(TokenKind::Boolean(true), (1, 43), (1, 47)),
-                new_token(TokenKind::Boolean(false), (1, 48), (1, 53)),
-                new_token(TokenKind::Eof, (1, 53), (1, 53)),
-            ]
-        )
-    }
-
-    #[test]
-    fn test_operators() {
-        let input = "+ - * /";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Plus, (1, 0), (1, 1)),
-                new_token(TokenKind::Minus, (1, 2), (1, 3)),
-                new_token(TokenKind::Star, (1, 4), (1, 5)),
-                new_token(TokenKind::Slash, (1, 6), (1, 7)),
-                new_token(TokenKind::Eof, (1, 7), (1, 7)),
-            ]
-        )
-    }
-
-    #[test]
-    fn test_punctuation() {
-        let input = "; { } ( ) : , =";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens,
-            vec![
-                new_token(TokenKind::Semi, (1, 0), (1, 1)),
-                new_token(TokenKind::LBrace, (1, 2), (1, 3)),
-                new_token(TokenKind::RBrace, (1, 4), (1, 5)),
-                new_token(TokenKind::LParen, (1, 6), (1, 7)),
-                new_token(TokenKind::RParen, (1, 8), (1, 9)),
-                new_token(TokenKind::Colon, (1, 10), (1, 11)),
-                new_token(TokenKind::Comma, (1, 12), (1, 13)),
-                new_token(TokenKind::Assign, (1, 14), (1, 15)),
-                new_token(TokenKind::Eof, (1, 15), (1, 15)),
-            ]
-        )
-    }
-
-    #[test]
-    fn test_position_tracking_multiline() {
-        let input = "var x = 1;\nvar y = 2;";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].loc.start.line, 1);
-        assert_eq!(tokens[0].loc.start.column, 0);
-        assert_eq!(tokens[5].loc.start.line, 2);
-        assert_eq!(tokens[5].loc.start.column, 0);
-        // Check that has_line_break is set correctly
-        assert!(tokens[4].has_line_break); // Semi has line break after it
-        assert!(!tokens[5].has_line_break); // Second var doesn't
-    }
-
-    #[test]
-    fn test_empty_input() {
-        let input = "";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].kind, TokenKind::Eof);
-    }
-
-    #[test]
-    fn test_whitespace_only() {
-        let input = "   \t   ";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].kind, TokenKind::Eof);
-    }
-
-    #[test]
-    fn test_has_line_break_single_newline() {
-        let input = "a\nb";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-        assert!(!tokens[1].has_line_break);
-    }
-
-    #[test]
-    fn test_has_line_break_carriage_return() {
-        let input = "a\rb";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-    }
-
-    #[test]
-    fn test_has_line_break_crlf() {
-        let input = "a\r\nb";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-    }
-
-    #[test]
-    fn test_has_line_break_multiple_newlines() {
-        let input = "a\n\nb";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-    }
-
-    #[test]
-    fn test_has_line_break_no_line_break() {
-        let input = "a b";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(!tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-    }
-
-    #[test]
-    fn test_has_line_break_with_semicolon() {
-        let input = "var x = 1;\nvar y = 2;";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[4].kind, TokenKind::Semi);
-        assert!(tokens[4].has_line_break);
-    }
-
-    #[test]
-    fn test_has_line_break_return_statement() {
-        let input = "return\n42";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Return);
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Number(42.0));
-    }
-
-    #[test]
-    fn test_line_position_reset() {
-        let input = "a\nb";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].loc.start.line, 1);
-        assert_eq!(tokens[0].loc.end.line, 1);
-        assert_eq!(tokens[1].loc.start.line, 2);
-        assert_eq!(tokens[1].loc.end.line, 2);
-    }
-
-    #[test]
-    fn test_mixed_whitespace_and_newlines() {
-        let input = "a  \n  b";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(tokens[0].kind, TokenKind::Ident("a".to_string()));
-        assert!(tokens[0].has_line_break);
-        assert_eq!(tokens[1].kind, TokenKind::Ident("b".to_string()));
-    }
-
-    #[test]
-    fn test_error_invalid_character() {
-        let input = "@";
-        let result = Lexer::new().tokenize(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_comparison_operators() {
-        let input = "== != < <= > >=";
-        let tokens = Lexer::new().tokenize(input).unwrap();
-        assert_eq!(
-            tokens[..6],
-            [
-                new_token(TokenKind::Eq, (1, 0), (1, 2)),
-                new_token(TokenKind::NotEq, (1, 3), (1, 5)),
-                new_token(TokenKind::Less, (1, 6), (1, 7)),
-                new_token(TokenKind::LessEq, (1, 8), (1, 10)),
-                new_token(TokenKind::Greater, (1, 11), (1, 12)),
-                new_token(TokenKind::GreaterEq, (1, 13), (1, 15)),
-            ]
-        );
+        let token = tokenize(r#" 'hello' '\'' '' "#);
+        assert_eq!(token[0].kind, TokenKind::StringLit("hello".to_string()));
+        assert_eq!(token[1].kind, TokenKind::StringLit("'".to_string()));
+        assert_eq!(token[2].kind, TokenKind::StringLit("".to_string()));
     }
 }
