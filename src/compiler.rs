@@ -572,6 +572,7 @@ impl Compiler {
             try_start: 0,
             try_end: 0,
             catch_start: 0,
+            catch_end: 0,
             finally_start: 0,
             finally_end: 0,
         };
@@ -601,6 +602,7 @@ impl Compiler {
             self.emit_u16(param_idx as u16);
 
             self.compile_block_statement(&handler.body)?;
+            exception_handler.catch_end = self.bytecode.len() - 1;
         }
 
         if let Some(finalizer) = &stmt.finalizer {

@@ -41,16 +41,12 @@ pub struct FunctionTemplate {
 pub type ConstantPool = Vec<Constant>;
 
 struct PendingException {
-    next_throw_addr: usize,
     value: JsValue,
 }
 
 impl PendingException {
-    pub fn new(next_throw_addr: usize, value: JsValue) -> Self {
-        Self {
-            next_throw_addr,
-            value,
-        }
+    pub fn new(value: JsValue) -> Self {
+        Self { value }
     }
 }
 
@@ -60,6 +56,8 @@ struct CallFrame {
     code: Rc<CodeBlock>,
     env: Rc<RefCell<Env>>,
 
+    /// Caller's CALL instruction address
+    call_addr: usize,
     this_value: JsValue,
     return_value: Option<JsValue>,
     end_addr: usize,
@@ -79,6 +77,7 @@ impl CallFrame {
             ip: 0,
             code,
             env,
+            call_addr: 0,
             this_value: JsValue::Undefined,
             return_value: None,
             end_addr,
@@ -495,7 +494,7 @@ impl Vm {
         self.run_loop()
     }
 
-    fn handle_throw(&mut self, mut ip: usize, value: JsValue) -> Result<(), RuntimeError> {
+    fn handle_throw(&mut self, mut addr: usize, value: JsValue) -> Result<(), RuntimeError> {
         loop {
             if self.frames.is_empty() {
                 return Err(RuntimeError::UncaughtException(value));
@@ -505,18 +504,14 @@ impl Vm {
 
             if let Some(handler_idx) = frame.active_handler.take() {
                 let handler = frame.code.exception_table[handler_idx];
-                // Check if still in active handler
-                if ip >= handler.try_start && ip <= handler.try_end {
-                    if handler.has_finally() {
-                        frame.pending_exception =
-                            Some(PendingException::new(handler.finally_end + 1, value));
-                        frame.ip = handler.finally_start;
-                        return Ok(());
-                    }
+                if handler.in_catch_range(addr) && handler.has_finally() {
+                    frame.pending_exception = Some(PendingException::new(value));
+                    frame.ip = handler.finally_start;
+                    return Ok(());
                 }
             }
 
-            let handler_idx = frame.code.find_exception_handler(ip);
+            let handler_idx = frame.code.find_exception_handler(addr);
 
             if let Some(handler_idx) = handler_idx {
                 let frame = self.frames.last_mut().unwrap();
@@ -531,8 +526,7 @@ impl Vm {
                 }
                 if handler.has_finally() {
                     frame.ip = handler.finally_start;
-                    frame.pending_exception =
-                        Some(PendingException::new(handler.finally_end + 1, value));
+                    frame.pending_exception = Some(PendingException::new(value));
                     return Ok(());
                 }
             }
@@ -541,25 +535,24 @@ impl Vm {
                 self.stack.truncate(frame.base);
             }
 
-            self.frames.last().map(|frame| ip = frame.ip - 1);
+            if let Some(frame) = self.frames.last() {
+                addr = frame.call_addr;
+            }
         }
     }
 
     fn run_loop(&mut self) -> Result<(), RuntimeError> {
         while let Some(frame) = self.frames.last_mut() {
-            if let Some(e) = &frame.pending_exception
-                && e.next_throw_addr == frame.ip
-            {
-                let e = frame.pending_exception.take().unwrap();
-                self.handle_throw(e.next_throw_addr, e.value)?;
-                continue;
-            }
-
-            if frame.ip >= frame.code.code.len() || frame.ip > frame.end_addr {
+            if frame.ip > frame.end_addr {
                 let frame = self.frames.pop().unwrap();
                 self.stack.truncate(frame.base);
-                let return_value = frame.return_value.unwrap_or(JsValue::Undefined);
 
+                if let Some(e) = frame.pending_exception {
+                    self.handle_throw(frame.end_addr, e.value)?;
+                    continue;
+                }
+
+                let return_value = frame.return_value.unwrap_or(JsValue::Undefined);
                 if frame.is_constructor && !runtime::is_object(&return_value) {
                     self.stack.push(frame.this_value);
                 } else {
@@ -569,6 +562,7 @@ impl Vm {
                 continue;
             }
 
+            let op_addr = frame.ip;
             let op: OpCode = frame.code.code[frame.ip]
                 .clone()
                 .try_into()
@@ -664,8 +658,7 @@ impl Vm {
                 OpCode::Nop => {}
                 OpCode::Throw => {
                     let value = self.stack.pop().unwrap();
-                    let ip = frame.ip - 1;
-                    self.handle_throw(ip, value)?;
+                    self.handle_throw(op_addr, value)?;
                 }
                 OpCode::PushConstant => {
                     let value = frame.get_constant();
@@ -738,17 +731,26 @@ impl Vm {
                     global_obj.set(name.clone(), value.clone());
                 }
                 OpCode::Call => {
+                    frame.call_addr = op_addr;
                     self.handle_op_call()?;
                 }
                 OpCode::Construct => {
+                    frame.call_addr = op_addr;
                     self.handle_op_construct()?;
                 }
                 OpCode::Return => {
-                    let handler = if let Some(handler_idx) = frame.active_handler {
-                        Some(&frame.code.exception_table[handler_idx])
-                    } else if let Some(handler_idx) =
-                        frame.code.find_exception_handler(frame.ip - 1)
-                    {
+                    frame.return_value = self.stack.pop();
+
+                    let handler = if let Some(idx) = frame.active_handler {
+                        let handler = &frame.code.exception_table[idx];
+                        if handler.in_catch_range(op_addr) {
+                            // Return in catch block
+                            Some(handler)
+                        } else {
+                            None
+                        }
+                    } else if let Some(handler_idx) = frame.code.find_exception_handler(op_addr) {
+                        // Return in try block
                         Some(&frame.code.exception_table[handler_idx])
                     } else {
                         None
@@ -760,10 +762,8 @@ impl Vm {
                         frame.ip = handler.finally_start;
                         frame.end_addr = handler.finally_end;
                     } else {
-                        frame.end_addr = frame.ip - 1;
+                        frame.end_addr = op_addr;
                     }
-
-                    frame.return_value = self.stack.pop();
                 }
                 OpCode::Jump => {
                     frame.ip = frame.read_u16() as usize;
@@ -973,6 +973,7 @@ impl Vm {
                     env,
                     this_value: this,
                     return_value: None,
+                    call_addr: 0,
                     end_addr: code.code.len() - 1,
                     is_constructor: false,
                     pending_exception: None,

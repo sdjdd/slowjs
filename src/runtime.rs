@@ -127,11 +127,11 @@ pub struct CodeBlock {
 }
 
 impl CodeBlock {
-    pub fn find_exception_handler(&self, ip: usize) -> Option<usize> {
+    pub fn find_exception_handler(&self, addr: usize) -> Option<usize> {
         self.exception_table
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.try_start <= ip && ip <= e.try_end)
+            .filter(|(_, e)| e.try_start <= addr && addr <= e.try_end)
             .min_by_key(|(_, e)| e.try_end)
             .map(|(i, _)| i)
     }
@@ -142,6 +142,7 @@ pub struct ExceptionHandler {
     pub try_start: usize,
     pub try_end: usize,
     pub catch_start: usize,
+    pub catch_end: usize,
     pub finally_start: usize,
     pub finally_end: usize,
 }
@@ -153,6 +154,14 @@ impl ExceptionHandler {
 
     pub fn has_finally(&self) -> bool {
         self.finally_start > 0
+    }
+
+    pub fn in_catch_range(&self, addr: usize) -> bool {
+        if self.has_catch() {
+            self.catch_start <= addr && addr <= self.catch_end
+        } else {
+            false
+        }
     }
 }
 
