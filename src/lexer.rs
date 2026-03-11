@@ -1,10 +1,10 @@
 use nom::{
     IResult, Parser,
     branch::alt,
-    bytes::complete::{escaped, is_not, tag, take_while, take_while1},
-    character::complete::{anychar, char, one_of},
+    bytes::complete::{escaped, is_not, tag, take_while},
+    character::complete::{anychar, char, digit0, digit1, one_of},
     combinator::{map, opt, recognize, value},
-    sequence::{delimited, pair},
+    sequence::{delimited, pair, tuple},
 };
 use thiserror::Error;
 
@@ -80,7 +80,8 @@ pub enum TokenKind {
 pub struct Token {
     pub kind: TokenKind,
     pub loc: SourceLocation,
-    pub has_line_break: bool, // True if there's a LineTerminator after this token
+    /// True if there's a LineTerminator after this token
+    pub has_line_break: bool,
 }
 
 #[derive(Debug, Error)]
@@ -153,10 +154,8 @@ impl Lexer {
             return Ok((input, TokenKind::Eof));
         }
 
-        if input.chars().next().unwrap().is_ascii_digit() {
-            return self
-                .parse_number(input)
-                .map_err(|_| LexerError(input.to_string()));
+        if let Ok(v) = self.parse_number(input) {
+            return Ok(v);
         }
 
         if input.starts_with('"') || input.starts_with('\'') {
@@ -240,9 +239,11 @@ impl Lexer {
     }
 
     fn parse_number<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
-        let integer = take_while1(|c: char| c.is_ascii_digit());
-        let fractional = opt(pair(char('.'), take_while(|c: char| c.is_ascii_digit())));
-        let number = recognize(pair(integer, fractional));
+        let number = alt((
+            recognize(tuple((digit1, tag("."), digit0))),
+            recognize(tuple((digit0, tag("."), digit1))),
+            digit1,
+        ));
 
         map(number, |num_str: &str| {
             self.pos.column += num_str.len();
