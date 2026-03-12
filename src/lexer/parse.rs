@@ -116,7 +116,7 @@ pub mod string_literal {
     fn unicode_escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((
             preceded(char('u'), hex_4_digits),
-            delimited(tag("u{"), code_point, char('}')),
+            delimited(tag("u{"), template_literal::code_point, char('}')),
         ))(input)
     }
 
@@ -144,16 +144,19 @@ pub mod string_literal {
     }
 }
 
-// Template Literal Lexical Components
-fn code_point(input: &str) -> IResult<&str, char, SyntaxError> {
-    recognize(many1(hex_digit))(input).and_then(|(output, digits)| {
-        let i = u32::from_str_radix(digits, 16).unwrap();
-        if i > 0x10FFFF {
-            return Err(nom::Err::Failure(
-                SyntaxError::new("Undefined Unicode code-point".to_string())
-                    .with_detail(input.len(), digits.len()),
-            ));
-        }
-        Ok((output, char::from_u32(i).unwrap()))
-    })
+mod template_literal {
+    use super::*;
+
+    pub fn code_point(input: &str) -> IResult<&str, char, SyntaxError> {
+        recognize(many1(hex_digit))(input).and_then(|(output, digits)| {
+            let i = u32::from_str_radix(digits, 16).unwrap();
+            if i > 0x10FFFF {
+                return Err(nom::Err::Failure(
+                    SyntaxError::new("Undefined Unicode code-point".to_string())
+                        .with_detail(input.len(), digits.len()),
+                ));
+            }
+            Ok((output, char::from_u32(i).unwrap()))
+        })
+    }
 }
