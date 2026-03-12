@@ -1,5 +1,5 @@
 use nom::{
-    IResult,
+    Finish, IResult,
     branch::alt,
     bytes::complete::{tag, take_while},
     character::complete::{digit0, digit1, one_of},
@@ -12,6 +12,35 @@ use crate::ast::{Position, SourceLocation};
 
 mod parse;
 use parse::string_literal;
+
+#[derive(Debug, Error, PartialEq)]
+#[error("SyntaxError: {message}")]
+pub struct SyntaxError {
+    pub message: String,
+    /// Source position in bytes
+    pub pos: usize,
+    /// Invalid source length in bytes
+    pub len: usize,
+
+    remains_len: usize,
+}
+
+impl SyntaxError {
+    pub fn new(message: String) -> Self {
+        Self {
+            message,
+            pos: 0,
+            len: 0,
+            remains_len: 0,
+        }
+    }
+
+    pub fn with_remains_data(mut self, remains_len: usize, len: usize) -> Self {
+        self.remains_len = remains_len;
+        self.len = len;
+        self
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -87,10 +116,6 @@ pub struct Token {
     pub has_line_break: bool,
 }
 
-#[derive(Debug, Error)]
-#[error("Invalid token: {0}")]
-pub struct LexerError(String);
-
 pub struct Lexer {
     pos: Position,
 }
@@ -102,7 +127,7 @@ impl Lexer {
         }
     }
 
-    pub fn tokenize(&mut self, input: &str) -> Result<Vec<Token>, LexerError> {
+    pub fn tokenize(&mut self, input: &str) -> Result<Vec<Token>, SyntaxError> {
         let mut tokens: Vec<Token> = Vec::new();
         let mut remaining = input;
         let mut finished = false;
@@ -121,7 +146,10 @@ impl Lexer {
             }
 
             let start = self.pos;
-            let (rest, kind) = self.parse_token(remaining)?;
+            let (rest, kind) = self.parse_token(remaining).map_err(|e| SyntaxError {
+                pos: input.len() - e.remains_len,
+                ..e
+            })?;
             let end = self.pos;
             remaining = rest;
 
@@ -152,7 +180,7 @@ impl Lexer {
         )
     }
 
-    fn parse_token<'a>(&mut self, input: &'a str) -> Result<(&'a str, TokenKind), LexerError> {
+    fn parse_token<'a>(&mut self, input: &'a str) -> Result<(&'a str, TokenKind), SyntaxError> {
         if input.is_empty() {
             return Ok((input, TokenKind::Eof));
         }
@@ -162,25 +190,22 @@ impl Lexer {
         }
 
         if input.starts_with('"') || input.starts_with('\'') {
-            return self
-                .parse_string(input)
-                .map_err(|_| LexerError(input.to_string()));
+            return self.parse_string(input).finish();
         }
 
-        if input.chars().next().unwrap().is_alphabetic()
-            || input.starts_with('_')
-            || input.starts_with('$')
-        {
-            return self
-                .parse_identifier(input)
-                .map_err(|_| LexerError(input.to_string()));
+        let ch = input.chars().next().unwrap();
+
+        if ch.is_alphabetic() || input.starts_with('_') || input.starts_with('$') {
+            return self.parse_identifier(input).map_err(|_| {
+                SyntaxError::new(format!("Invalid token {}", ch))
+                    .with_remains_data(input.len(), ch.len_utf8())
+            });
         }
 
         if let Ok((rest, kind)) = self.parse_binary_op(input) {
             return Ok((rest, kind));
         }
 
-        let ch = input.chars().next().unwrap();
         let (input, kind) = match ch {
             '+' => (&input[1..], TokenKind::Plus),
             '-' => (&input[1..], TokenKind::Minus),
@@ -200,7 +225,10 @@ impl Lexer {
             '[' => (&input[1..], TokenKind::LBracket),
             ']' => (&input[1..], TokenKind::RBracket),
             '!' => (&input[1..], TokenKind::Bang),
-            c => return Err(LexerError(c.to_string())),
+            c => {
+                return Err(SyntaxError::new(format!("Invalid token {}", c))
+                    .with_remains_data(input.len(), c.len_utf8()));
+            }
         };
         self.pos.column += 1;
 
@@ -254,7 +282,7 @@ impl Lexer {
         })(input)
     }
 
-    fn parse_string<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind> {
+    fn parse_string<'a>(&mut self, input: &'a str) -> IResult<&'a str, TokenKind, SyntaxError> {
         map(string_literal::parse, |s: String| {
             self.pos.column += s.len() + 2; // 2 for quotes
             TokenKind::StringLit(s)

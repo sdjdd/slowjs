@@ -2,7 +2,7 @@ use colored::Colorize;
 
 use slowjs::compiler::Compiler;
 use slowjs::js_std::console;
-use slowjs::lexer::{Lexer, TokenKind};
+use slowjs::lexer::{Lexer, SyntaxError, TokenKind};
 use slowjs::parser::{ParseError, Parser};
 use slowjs::runtime::JsValue;
 use slowjs::vm::Vm;
@@ -14,6 +14,7 @@ use crate::repl::editor::{Editor, EditorContext, EditorError, EditorEventHandler
 enum ReplError {
     ImcompleteInput,
     Other(String),
+    SyntaxError(SyntaxError),
 }
 
 struct Repl {
@@ -36,7 +37,7 @@ impl Repl {
     fn process_input(&mut self) -> Result<JsValue, ReplError> {
         let tokens = Lexer::new()
             .tokenize(&self.input_buffer)
-            .map_err(|e| ReplError::Other(e.to_string()))?;
+            .map_err(|e| ReplError::SyntaxError(e))?;
 
         if tokens.is_empty() {
             return Ok(JsValue::Undefined);
@@ -137,8 +138,12 @@ impl EditorEventHandler for Repl {
             Err(ReplError::ImcompleteInput) => {
                 self.input_buffer.push('\n');
             }
-            Err(ReplError::Other(e)) => {
-                println!("Error: {e}");
+            Err(ReplError::SyntaxError(error)) => {
+                print_syntax_error(&self.input_buffer, error);
+                self.input_buffer.clear();
+            }
+            Err(ReplError::Other(error)) => {
+                println!("{error}");
                 self.input_buffer.clear();
             }
         }
@@ -219,4 +224,21 @@ fn print_string(s: &str) {
     }
     buffer.push('\'');
     println!("{}", buffer.green());
+}
+
+fn print_syntax_error(input: &str, error: SyntaxError) {
+    use ::console::measure_text_width as width;
+    if error.len > 0 {
+        let idx = error.pos;
+        eprintln!("idx={}", idx);
+        let content_before = &input[..idx];
+        let content = &input[idx..idx + error.len];
+        println!("{}", input);
+        println!(
+            "{}{}",
+            " ".repeat(width(content_before)),
+            "^".repeat(width(content))
+        );
+    }
+    println!("{}", error);
 }

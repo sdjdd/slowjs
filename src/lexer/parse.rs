@@ -6,15 +6,27 @@ use nom::combinator::{map, not, recognize, value};
 use nom::multi::{count, many0, many1};
 use nom::sequence::{delimited, preceded, terminated};
 
-fn decimal_digit(input: &str) -> IResult<&str, char> {
+use crate::lexer::SyntaxError;
+
+impl nom::error::ParseError<&str> for SyntaxError {
+    fn from_error_kind(input: &str, _kind: nom::error::ErrorKind) -> Self {
+        Self::new(format!("Invalid input: {}", input))
+    }
+
+    fn append(_input: &str, _kind: nom::error::ErrorKind, other: Self) -> Self {
+        other
+    }
+}
+
+fn decimal_digit(input: &str) -> IResult<&str, char, SyntaxError> {
     one_of("0123456789")(input)
 }
 
-fn hex_digit(input: &str) -> IResult<&str, char> {
+fn hex_digit(input: &str) -> IResult<&str, char, SyntaxError> {
     one_of("0123456789abcdefABCDEF")(input)
 }
 
-fn line_terminator(input: &str) -> IResult<&str, char> {
+fn line_terminator(input: &str) -> IResult<&str, char, SyntaxError> {
     one_of("\n\r\u{2028}\u{2029}")(input)
 }
 
@@ -22,7 +34,7 @@ pub mod string_literal {
 
     use super::*;
 
-    pub fn parse(input: &str) -> IResult<&str, String> {
+    pub fn parse(input: &str) -> IResult<&str, String, SyntaxError> {
         map(
             alt((
                 delimited(char('"'), double_string_characters, char('"')),
@@ -32,15 +44,15 @@ pub mod string_literal {
         )(input)
     }
 
-    fn double_string_characters(input: &str) -> IResult<&str, Vec<char>> {
+    fn double_string_characters(input: &str) -> IResult<&str, Vec<char>, SyntaxError> {
         many0(double_string_character)(input)
     }
 
-    fn single_string_characters(input: &str) -> IResult<&str, Vec<char>> {
+    fn single_string_characters(input: &str) -> IResult<&str, Vec<char>, SyntaxError> {
         many0(single_string_character)(input)
     }
 
-    fn double_string_character(input: &str) -> IResult<&str, char> {
+    fn double_string_character(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((
             preceded(not(alt((one_of("\"\\"), line_terminator))), anychar),
             char('\u{2028}'), // <LS>
@@ -51,7 +63,7 @@ pub mod string_literal {
         ))(input)
     }
 
-    fn single_string_character(input: &str) -> IResult<&str, char> {
+    fn single_string_character(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((
             preceded(not(alt((one_of("'\\"), line_terminator))), anychar),
             char('\u{2028}'), // <LS>
@@ -62,7 +74,7 @@ pub mod string_literal {
         ))(input)
     }
 
-    fn escape_sequence(input: &str) -> IResult<&str, char> {
+    fn escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((
             character_escape_sequence,
             terminated(char('0'), not(decimal_digit)),
@@ -74,11 +86,11 @@ pub mod string_literal {
         ))(input)
     }
 
-    fn character_escape_sequence(input: &str) -> IResult<&str, char> {
+    fn character_escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((single_escape_character, non_escape_character))(input)
     }
 
-    fn single_escape_character(input: &str) -> IResult<&str, char> {
+    fn single_escape_character(input: &str) -> IResult<&str, char, SyntaxError> {
         // one_of("'\"\\bfnrtv")(input)
         alt((
             char('\''),
@@ -93,22 +105,22 @@ pub mod string_literal {
         ))(input)
     }
 
-    fn non_escape_character(input: &str) -> IResult<&str, char> {
+    fn non_escape_character(input: &str) -> IResult<&str, char, SyntaxError> {
         preceded(not(alt((escape_character, line_terminator))), anychar)(input)
     }
 
-    fn escape_character(input: &str) -> IResult<&str, char> {
+    fn escape_character(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((single_escape_character, decimal_digit, char('x'), char('u')))(input)
     }
 
-    fn unicode_escape_sequence(input: &str) -> IResult<&str, char> {
+    fn unicode_escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((
             preceded(char('u'), hex_4_digits),
             delimited(tag("u{"), code_point, char('}')),
         ))(input)
     }
 
-    fn hex_4_digits(input: &str) -> IResult<&str, char> {
+    fn hex_4_digits(input: &str) -> IResult<&str, char, SyntaxError> {
         map(recognize(count(hex_digit, 4)), |digits| {
             let i = u32::from_str_radix(digits, 16).unwrap();
             char::from_u32(i).unwrap()
@@ -133,13 +145,15 @@ pub mod string_literal {
 }
 
 // Template Literal Lexical Components
-fn code_point(input: &str) -> IResult<&str, char> {
-    map(recognize(many1(hex_digit)), |digits| {
+fn code_point(input: &str) -> IResult<&str, char, SyntaxError> {
+    recognize(many1(hex_digit))(input).and_then(|(output, digits)| {
         let i = u32::from_str_radix(digits, 16).unwrap();
         if i > 0x10FFFF {
-            // TODO: error handling
-            panic!("Invalid code point");
+            return Err(nom::Err::Failure(
+                SyntaxError::new("Undefined Unicode code-point".to_string())
+                    .with_remains_data(input.len(), digits.len()),
+            ));
         }
-        char::from_u32(i).unwrap()
-    })(input)
+        Ok((output, char::from_u32(i).unwrap()))
+    })
 }

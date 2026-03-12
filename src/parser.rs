@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::lexer::{LexerError, Token, TokenKind};
+use crate::lexer::{Token, TokenKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -12,8 +12,6 @@ pub enum ParseError {
     },
     #[error("SyntaxError: {message}")]
     SyntaxError { message: String },
-    #[error(transparent)]
-    Lexer(#[from] LexerError),
 }
 
 pub struct Parser {

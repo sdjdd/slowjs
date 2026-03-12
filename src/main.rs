@@ -38,7 +38,12 @@ fn run_script(input: &str) {
     let mut compiler = Compiler::new();
     let mut vm = Vm::new();
 
-    let tokens = lexer.tokenize(input).expect("Failed to tokenize input");
+    let tokens = match lexer.tokenize(input) {
+        Ok(tokens) => tokens,
+        Err(err) => {
+            panic!("{}", err);
+        }
+    };
 
     let program = Parser::new(tokens)
         .parse_program()
