@@ -35,7 +35,7 @@ impl SyntaxError {
         }
     }
 
-    pub fn with_remains_data(mut self, remains_len: usize, len: usize) -> Self {
+    pub fn with_detail(mut self, remains_len: usize, len: usize) -> Self {
         self.remains_len = remains_len;
         self.len = len;
         self
@@ -198,7 +198,7 @@ impl Lexer {
         if ch.is_alphabetic() || input.starts_with('_') || input.starts_with('$') {
             return self.parse_identifier(input).map_err(|_| {
                 SyntaxError::new(format!("Invalid token {}", ch))
-                    .with_remains_data(input.len(), ch.len_utf8())
+                    .with_detail(input.len(), ch.len_utf8())
             });
         }
 
@@ -227,7 +227,7 @@ impl Lexer {
             '!' => (&input[1..], TokenKind::Bang),
             c => {
                 return Err(SyntaxError::new(format!("Invalid token {}", c))
-                    .with_remains_data(input.len(), c.len_utf8()));
+                    .with_detail(input.len(), c.len_utf8()));
             }
         };
         self.pos.column += 1;

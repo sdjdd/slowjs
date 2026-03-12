@@ -151,7 +151,7 @@ fn code_point(input: &str) -> IResult<&str, char, SyntaxError> {
         if i > 0x10FFFF {
             return Err(nom::Err::Failure(
                 SyntaxError::new("Undefined Unicode code-point".to_string())
-                    .with_remains_data(input.len(), digits.len()),
+                    .with_detail(input.len(), digits.len()),
             ));
         }
         Ok((output, char::from_u32(i).unwrap()))
