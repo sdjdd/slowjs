@@ -2,9 +2,9 @@ use nom::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{anychar, char, one_of};
-use nom::combinator::{map, not, recognize, value};
+use nom::combinator::{map, not, peek, recognize, value};
 use nom::multi::{count, fold_many0, many1};
-use nom::sequence::{delimited, preceded, terminated};
+use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 
 use crate::lexer::SyntaxError;
 
@@ -16,6 +16,10 @@ impl nom::error::ParseError<&str> for SyntaxError {
     fn append(_input: &str, _kind: nom::error::ErrorKind, other: Self) -> Self {
         other
     }
+}
+
+fn octal_digit(input: &str) -> IResult<&str, char, SyntaxError> {
+    one_of("01234567")(input)
 }
 
 fn decimal_digit(input: &str) -> IResult<&str, char, SyntaxError> {
@@ -99,8 +103,8 @@ pub mod string_literal {
         alt((
             character_escape_sequence,
             terminated(char('0'), not(decimal_digit)),
+            legacy_octal_escape_sequence,
             // TODO:
-            // LegacyOctalEscapeSequence
             // NonOctalDecimalEscapeSequence
             // HexEscapeSequence
             unicode_escape_sequence,
@@ -132,6 +136,45 @@ pub mod string_literal {
 
     fn escape_character(input: &str) -> IResult<&str, char, SyntaxError> {
         alt((single_escape_character, decimal_digit, char('x'), char('u')))(input)
+    }
+
+    fn legacy_octal_escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
+        alt((
+            terminated(char('0'), peek(one_of("89"))),
+            terminated(non_zero_octal_digit, not(octal_digit)),
+            terminated(
+                map(
+                    pair(one_of("0123"), octal_digit),
+                    |(c1, c2): (char, char)| {
+                        let i1 = c1.to_digit(8).unwrap();
+                        let i2 = c2.to_digit(8).unwrap();
+                        char::from_u32(i1 * 8 + i2).unwrap()
+                    },
+                ),
+                not(octal_digit),
+            ),
+            map(
+                pair(one_of("4567"), octal_digit),
+                |(c1, c2): (char, char)| {
+                    let i1 = c1.to_digit(8).unwrap();
+                    let i2 = c2.to_digit(8).unwrap();
+                    char::from_u32(i1 * 8 + i2).unwrap()
+                },
+            ),
+            map(
+                tuple((one_of("0123"), octal_digit, octal_digit)),
+                |(c1, c2, c3)| {
+                    let i1 = c1.to_digit(8).unwrap();
+                    let i2 = c2.to_digit(8).unwrap();
+                    let i3 = c3.to_digit(8).unwrap();
+                    char::from_u32(i1 * 64 + i2 * 8 + i3).unwrap()
+                },
+            ),
+        ))(input)
+    }
+
+    fn non_zero_octal_digit(input: &str) -> IResult<&str, char, SyntaxError> {
+        one_of("1234567")(input)
     }
 
     fn unicode_escape_sequence(input: &str) -> IResult<&str, char, SyntaxError> {
@@ -175,6 +218,21 @@ pub mod string_literal {
             assert_eq!(
                 parse("\"hello\\\nworld\""),
                 Ok(("", "helloworld".to_string()))
+            );
+        }
+
+        #[test]
+        fn test_legacy_octal_escape_sequence() {
+            assert_eq!(legacy_octal_escape_sequence("08"), Ok(("8", '0')));
+            assert_eq!(legacy_octal_escape_sequence("1abc"), Ok(("abc", '1')));
+            assert_eq!(
+                legacy_octal_escape_sequence("37abc"),
+                Ok(("abc", '\u{01F}'))
+            );
+            assert_eq!(legacy_octal_escape_sequence("43"), Ok(("", '\u{23}')));
+            assert_eq!(
+                legacy_octal_escape_sequence("345abc"),
+                Ok(("abc", '\u{E5}'))
             );
         }
     }
