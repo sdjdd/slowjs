@@ -3,7 +3,7 @@ use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{anychar, char, one_of};
 use nom::combinator::{map, not, recognize, value};
-use nom::multi::{count, many0, many1};
+use nom::multi::{count, fold_many0, many1};
 use nom::sequence::{delimited, preceded, terminated};
 
 use crate::lexer::SyntaxError;
@@ -31,7 +31,6 @@ fn line_terminator(input: &str) -> IResult<&str, char, SyntaxError> {
 }
 
 pub mod string_literal {
-
     use super::*;
 
     pub fn parse(input: &str) -> IResult<&str, String, SyntaxError> {
@@ -45,32 +44,54 @@ pub mod string_literal {
     }
 
     fn double_string_characters(input: &str) -> IResult<&str, Vec<char>, SyntaxError> {
-        many0(double_string_character)(input)
+        fold_many0(double_string_character, Vec::new, |mut acc, item| {
+            if let Some(c) = item {
+                acc.push(c);
+            }
+            acc
+        })(input)
     }
 
     fn single_string_characters(input: &str) -> IResult<&str, Vec<char>, SyntaxError> {
-        many0(single_string_character)(input)
+        fold_many0(single_string_character, Vec::new, |mut acc, item| {
+            if let Some(c) = item {
+                acc.push(c);
+            }
+            acc
+        })(input)
     }
 
-    fn double_string_character(input: &str) -> IResult<&str, char, SyntaxError> {
-        alt((
+    fn double_string_character(input: &str) -> IResult<&str, Option<char>, SyntaxError> {
+        let parse = alt((
             preceded(not(alt((one_of("\"\\"), line_terminator))), anychar),
             char('\u{2028}'), // <LS>
             char('\u{2029}'), // <PS>
             preceded(char('\\'), escape_sequence),
-            // TODO
-            // LineContinuation
-        ))(input)
+        ));
+        alt((map(parse, |c| Some(c)), line_continuation))(input)
     }
 
-    fn single_string_character(input: &str) -> IResult<&str, char, SyntaxError> {
-        alt((
+    fn single_string_character(input: &str) -> IResult<&str, Option<char>, SyntaxError> {
+        let parse = alt((
             preceded(not(alt((one_of("'\\"), line_terminator))), anychar),
             char('\u{2028}'), // <LS>
             char('\u{2029}'), // <PS>
             preceded(char('\\'), escape_sequence),
-            // TODO:
-            // LineContinuation
+        ));
+        alt((map(parse, |c| Some(c)), line_continuation))(input)
+    }
+
+    fn line_continuation(input: &str) -> IResult<&str, Option<char>, SyntaxError> {
+        map(preceded(char('\\'), line_terminator_sequence), |_| None)(input)
+    }
+
+    fn line_terminator_sequence(input: &str) -> IResult<&str, &str, SyntaxError> {
+        alt((
+            tag("\n"),
+            terminated(tag("\r"), not(char('\n'))),
+            tag("\u{2028}"),
+            tag("\u{2029}"),
+            tag("\r\n"),
         ))(input)
     }
 
@@ -140,6 +161,21 @@ pub mod string_literal {
         #[test]
         fn test_hex_4_digits() {
             assert_eq!(hex_4_digits("0041"), Ok(("", 'A')));
+        }
+
+        #[test]
+        fn test_line_continuation() {
+            assert_eq!(line_continuation("\\\n"), Ok(("", None)));
+            assert_eq!(line_continuation("\\\r"), Ok(("", None)));
+            assert_eq!(line_continuation("\\\r\n"), Ok(("", None)));
+        }
+
+        #[test]
+        fn test_string_with_line_continuation() {
+            assert_eq!(
+                parse("\"hello\\\nworld\""),
+                Ok(("", "helloworld".to_string()))
+            );
         }
     }
 }
