@@ -131,6 +131,7 @@ impl Compiler {
             Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
             Statement::IfStatement(stmt) => self.compile_if_statement(stmt)?,
             Statement::WhileStatement(stmt) => self.compile_while_statement(stmt)?,
+            Statement::ForStatement(stmt) => self.compile_for_statement(stmt)?,
             Statement::ThrowStatement(stmt) => self.compile_throw_statement(stmt)?,
             Statement::TryStatement(stmt) => self.compile_try_statement(stmt)?,
         };
@@ -183,6 +184,55 @@ impl Compiler {
 
         let exit_addr = self.bytecode.len();
         self.write_u16(exit_jump_offset, exit_addr as u16);
+
+        Ok(())
+    }
+
+    fn compile_for_statement(&mut self, stmt: &ForStatement) -> Result<(), CompilerError> {
+        if let Some(init) = &stmt.init {
+            match init {
+                ForInit::VariableDeclaration(decl) => {
+                    self.compile_variable_declaration(decl)?;
+                }
+                ForInit::Expression(expr) => {
+                    self.compile_expression(expr)?;
+                    self.emit(OpCode::Pop);
+                }
+            }
+        }
+
+        let loop_start = self.bytecode.len();
+
+        if let Some(test) = &stmt.test {
+            self.compile_expression(test)?;
+            self.emit(OpCode::JumpIfFalse);
+            let exit_jump_offset = self.emit_u16(0);
+
+            self.compile_statement(&stmt.body)?;
+
+            if let Some(update) = &stmt.update {
+                self.compile_expression(update)?;
+                self.emit(OpCode::Pop);
+            }
+
+            // Jump back to test
+            self.emit(OpCode::Jump);
+            self.emit_u16(loop_start as u16);
+
+            let exit_addr = self.bytecode.len();
+            self.write_u16(exit_jump_offset, exit_addr as u16);
+        } else {
+            // No test - infinite loop
+            self.compile_statement(&stmt.body)?;
+
+            if let Some(update) = &stmt.update {
+                self.compile_expression(update)?;
+                self.emit(OpCode::Pop);
+            }
+
+            self.emit(OpCode::Jump);
+            self.emit_u16(loop_start as u16);
+        }
 
         Ok(())
     }

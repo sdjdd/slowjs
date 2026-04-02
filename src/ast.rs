@@ -89,6 +89,7 @@ pub enum Statement {
     ThrowStatement(ThrowStatement),
     TryStatement(TryStatement),
     WhileStatement(WhileStatement),
+    ForStatement(ForStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -242,6 +243,21 @@ pub struct IfStatement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WhileStatement {
     pub test: Box<Expression>,
+    pub body: Box<Statement>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForInit {
+    VariableDeclaration(VariableDeclaration),
+    Expression(Expression),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForStatement {
+    pub init: Option<ForInit>,
+    pub test: Option<Expression>,
+    pub update: Option<Expression>,
     pub body: Box<Statement>,
     pub loc: Option<SourceLocation>,
 }

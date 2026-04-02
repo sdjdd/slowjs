@@ -158,6 +158,7 @@ impl Parser {
             }
             TokenKind::If => Ok(Statement::IfStatement(self.parse_if_statement()?)),
             TokenKind::While => Ok(Statement::WhileStatement(self.parse_while_statement()?)),
+            TokenKind::For => Ok(Statement::ForStatement(self.parse_for_statement()?)),
             TokenKind::Function => Ok(Statement::Declaration(Declaration::FunctionDeclaration(
                 self.parse_function_declaration()?,
             ))),
@@ -192,16 +193,12 @@ impl Parser {
         self.expect(TokenKind::Var)?;
 
         let mut declarations = Vec::new();
-
         loop {
-            declarations.push(self.parse_variable_declaration()?);
-
-            match self.current() {
-                TokenKind::Comma => {
-                    self.advance();
-                    continue;
-                }
-                _ => break,
+            declarations.push(self.parse_variable_declarator()?);
+            if self.current() == &TokenKind::Comma {
+                self.advance();
+            } else {
+                break;
             }
         }
 
@@ -217,7 +214,7 @@ impl Parser {
         )))
     }
 
-    fn parse_variable_declaration(&mut self) -> Result<VariableDeclarator, ParseError> {
+    fn parse_variable_declarator(&mut self) -> Result<VariableDeclarator, ParseError> {
         let mut loc = self.current_loc();
         match self.current() {
             TokenKind::Ident(name) => {
@@ -244,6 +241,28 @@ impl Parser {
             }
             _ => Err(self.unexpected()),
         }
+    }
+
+    fn parse_variable_declaration(&mut self) -> Result<VariableDeclaration, ParseError> {
+        let start_pos = self.current_loc().start;
+        self.expect(TokenKind::Var)?;
+
+        let mut declarations = Vec::new();
+        loop {
+            declarations.push(self.parse_variable_declarator()?);
+            if self.current() == &TokenKind::Comma {
+                self.advance();
+                continue;
+            }
+            break;
+        }
+
+        let end_pos = self.current_loc().end;
+        Ok(VariableDeclaration {
+            declarations,
+            kind: VariableDeclarationKind::Var,
+            loc: Some(SourceLocation::new(start_pos, end_pos)),
+        })
     }
 
     fn parse_initializer(&mut self) -> Result<Expression, ParseError> {
@@ -717,6 +736,51 @@ impl Parser {
         loc.end = self.current_loc().start;
         Ok(WhileStatement {
             test: Box::new(test),
+            body: Box::new(body),
+            loc: Some(loc),
+        })
+    }
+
+    fn parse_for_statement(&mut self) -> Result<ForStatement, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::For)?;
+        self.expect(TokenKind::LParen)?;
+
+        let init = if self.current() == &TokenKind::Semi {
+            None
+        } else if self.current() == &TokenKind::Var {
+            Some(ForInit::VariableDeclaration(
+                self.parse_variable_declaration()?,
+            ))
+        } else {
+            Some(ForInit::Expression(self.parse_expression()?))
+        };
+
+        self.expect(TokenKind::Semi)?;
+
+        let test = if self.current() == &TokenKind::Semi {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+
+        self.expect(TokenKind::Semi)?;
+
+        let update = if self.current() == &TokenKind::RParen {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+
+        self.expect(TokenKind::RParen)?;
+
+        let body = self.parse_statement()?;
+        loc.end = self.current_loc().start;
+
+        Ok(ForStatement {
+            init,
+            test,
+            update,
             body: Box::new(body),
             loc: Some(loc),
         })
