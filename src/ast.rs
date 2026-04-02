@@ -88,6 +88,7 @@ pub enum Statement {
     ReturnStatement(ReturnStatement),
     ThrowStatement(ThrowStatement),
     TryStatement(TryStatement),
+    WhileStatement(WhileStatement),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +236,13 @@ pub struct IfStatement {
     pub test: Box<Expression>,
     pub consequent: Box<Statement>,
     pub alternate: Option<Box<Statement>>,
+    pub loc: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhileStatement {
+    pub test: Box<Expression>,
+    pub body: Box<Statement>,
     pub loc: Option<SourceLocation>,
 }
 

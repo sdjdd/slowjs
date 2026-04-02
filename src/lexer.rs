@@ -64,6 +64,7 @@ pub enum TokenKind {
     Try,
     Catch,
     Finally,
+    While,
 
     // Operators
     Plus,  // +
@@ -312,6 +313,7 @@ impl Lexer {
                 "try" => TokenKind::Try,
                 "catch" => TokenKind::Catch,
                 "finally" => TokenKind::Finally,
+                "while" => TokenKind::While,
                 "instanceof" => TokenKind::Instanceof,
                 _ => TokenKind::Ident(ident.to_string()),
             }

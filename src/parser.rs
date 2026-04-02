@@ -157,6 +157,7 @@ impl Parser {
                 Ok(Statement::EmptyStatement)
             }
             TokenKind::If => Ok(Statement::IfStatement(self.parse_if_statement()?)),
+            TokenKind::While => Ok(Statement::WhileStatement(self.parse_while_statement()?)),
             TokenKind::Function => Ok(Statement::Declaration(Declaration::FunctionDeclaration(
                 self.parse_function_declaration()?,
             ))),
@@ -702,6 +703,21 @@ impl Parser {
             test: Box::new(test),
             consequent: Box::new(consequent),
             alternate: alternate.map(Box::new),
+            loc: Some(loc),
+        })
+    }
+
+    fn parse_while_statement(&mut self) -> Result<WhileStatement, ParseError> {
+        let mut loc = self.current_loc();
+        self.expect(TokenKind::While)?;
+        self.expect(TokenKind::LParen)?;
+        let test = self.parse_expression()?;
+        self.expect(TokenKind::RParen)?;
+        let body = self.parse_statement()?;
+        loc.end = self.current_loc().start;
+        Ok(WhileStatement {
+            test: Box::new(test),
+            body: Box::new(body),
             loc: Some(loc),
         })
     }

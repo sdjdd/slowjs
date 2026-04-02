@@ -130,6 +130,7 @@ impl Compiler {
             Statement::ReturnStatement(stmt) => self.compile_return_statement(stmt)?,
             Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
             Statement::IfStatement(stmt) => self.compile_if_statement(stmt)?,
+            Statement::WhileStatement(stmt) => self.compile_while_statement(stmt)?,
             Statement::ThrowStatement(stmt) => self.compile_throw_statement(stmt)?,
             Statement::TryStatement(stmt) => self.compile_try_statement(stmt)?,
         };
@@ -163,6 +164,25 @@ impl Compiler {
 
         let end_addr = self.bytecode.len();
         self.write_u16(end_jump_offset, end_addr as u16);
+
+        Ok(())
+    }
+
+    fn compile_while_statement(&mut self, stmt: &WhileStatement) -> Result<(), CompilerError> {
+        let loop_start = self.bytecode.len();
+
+        self.compile_expression(&stmt.test)?;
+
+        self.emit(OpCode::JumpIfFalse);
+        let exit_jump_offset = self.emit_u16(0);
+
+        self.compile_statement(&stmt.body)?;
+
+        self.emit(OpCode::Jump);
+        self.emit_u16(loop_start as u16);
+
+        let exit_addr = self.bytecode.len();
+        self.write_u16(exit_jump_offset, exit_addr as u16);
 
         Ok(())
     }
