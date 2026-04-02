@@ -118,13 +118,18 @@ impl Parser {
 
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut body = Vec::new();
+        let mut loc = self.current_loc();
 
         while !matches!(self.current(), TokenKind::Eof) {
             let item = self.parse_program_body_item()?;
+            loc.end = self.current_loc().end;
             body.push(item);
         }
 
-        Ok(Program { body })
+        Ok(Program {
+            body,
+            loc: Some(loc),
+        })
     }
 
     fn parse_program_body_item(&mut self) -> Result<ProgramBodyItem, ParseError> {
@@ -139,6 +144,7 @@ impl Parser {
                 return Ok(ProgramBodyItem::Directive(Directive {
                     expression: Literal::new(LiteralValue::String(s.clone()), loc),
                     directive: s,
+                    loc,
                 }));
             }
             self.pos = pos_before;
@@ -153,8 +159,9 @@ impl Parser {
             TokenKind::LBrace => Ok(Statement::BlockStatement(self.parse_block_statement()?)),
             TokenKind::Var => self.parse_variable_statement(),
             TokenKind::Semi => {
+                let loc = self.current_loc();
                 self.advance();
-                Ok(Statement::EmptyStatement)
+                Ok(Statement::EmptyStatement(EmptyStatement { loc: Some(loc) }))
             }
             TokenKind::If => Ok(Statement::IfStatement(self.parse_if_statement()?)),
             TokenKind::While => Ok(Statement::WhileStatement(self.parse_while_statement()?)),
@@ -277,7 +284,7 @@ impl Parser {
 
         let start_pos = self.current_loc().start;
         let expression = self.parse_expression()?;
-        let end_pos = self.current_loc().end;
+        let end_pos = expression.loc().unwrap().end;
         self.expect(TokenKind::Semi)?;
 
         Ok(Statement::ExpressionStatement(ExpressionStatement {
@@ -713,11 +720,13 @@ impl Parser {
         let consequent = self.parse_statement()?;
         let alternate = if matches!(self.current(), TokenKind::Else) {
             self.advance();
-            Some(self.parse_statement()?)
+            let stmt = self.parse_statement()?;
+            loc.end = stmt.loc().unwrap().end;
+            Some(stmt)
         } else {
+            loc.end = consequent.loc().unwrap().end;
             None
         };
-        loc.end = self.current_loc().start;
         Ok(IfStatement {
             test: Box::new(test),
             consequent: Box::new(consequent),
@@ -733,7 +742,7 @@ impl Parser {
         let test = self.parse_expression()?;
         self.expect(TokenKind::RParen)?;
         let body = self.parse_statement()?;
-        loc.end = self.current_loc().start;
+        loc.end = body.loc().unwrap().end;
         Ok(WhileStatement {
             test: Box::new(test),
             body: Box::new(body),
@@ -775,7 +784,7 @@ impl Parser {
         self.expect(TokenKind::RParen)?;
 
         let body = self.parse_statement()?;
-        loc.end = self.current_loc().start;
+        loc.end = body.loc().unwrap().end;
 
         Ok(ForStatement {
             init,
@@ -891,6 +900,7 @@ impl Parser {
                 return Ok(FunctionBodyItem::Directive(Directive {
                     expression: Literal::new(LiteralValue::String(s.clone()), loc),
                     directive: s,
+                    loc,
                 }));
             }
             self.pos = pos_before;
@@ -913,7 +923,7 @@ impl Parser {
         }
 
         let argument = self.parse_expression()?;
-        loc.end = self.current_loc().end;
+        loc.end = argument.loc().unwrap().end;
         self.expect(TokenKind::Semi)?;
 
         Ok(ReturnStatement {
@@ -933,7 +943,7 @@ impl Parser {
         }
 
         let argument = self.parse_expression()?;
-        loc.end = self.current_loc().end;
+        loc.end = argument.loc().unwrap().end;
         self.expect(TokenKind::Semi)?;
 
         Ok(ThrowStatement {
@@ -949,23 +959,25 @@ impl Parser {
         let block = self.parse_block_statement()?;
 
         let handler = if matches!(self.current(), TokenKind::Catch) {
-            Some(self.parse_catch_clause()?)
+            let catch = self.parse_catch_clause()?;
+            loc.end = catch.loc.unwrap().end;
+            Some(catch)
         } else {
             None
         };
 
         let finalizer = if matches!(self.current(), TokenKind::Finally) {
             self.advance();
-            Some(self.parse_block_statement()?)
+            let stmt = self.parse_block_statement()?;
+            loc.end = stmt.loc.unwrap().end;
+            Some(stmt)
         } else {
             None
         };
 
-        loc.end = self.current_loc().end;
-
         if handler.is_none() && finalizer.is_none() {
             return Err(ParseError::SyntaxError {
-                message: " Missing catch or finally after try".to_string(),
+                message: "Missing catch or finally after try".to_string(),
             });
         }
 

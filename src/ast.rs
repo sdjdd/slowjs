@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourceLocation {
     pub start: Position,
     pub end: Position,
@@ -10,7 +10,7 @@ impl SourceLocation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
@@ -59,30 +59,41 @@ impl Literal {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProgramBodyItem {
     Statement(Statement),
     Directive(Directive),
 }
 
+impl ProgramBodyItem {
+    pub fn loc(&self) -> Option<SourceLocation> {
+        match self {
+            ProgramBodyItem::Statement(stmt) => stmt.loc(),
+            ProgramBodyItem::Directive(dir) => dir.loc,
+        }
+    }
+}
+
 pub type ProgramBody = Vec<ProgramBodyItem>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Program {
     pub body: ProgramBody,
+    pub loc: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Directive {
     pub expression: Literal,
     pub directive: String,
+    pub loc: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     ExpressionStatement(ExpressionStatement),
     BlockStatement(BlockStatement),
-    EmptyStatement,
+    EmptyStatement(EmptyStatement),
     Declaration(Declaration),
     IfStatement(IfStatement),
     ReturnStatement(ReturnStatement),
@@ -90,6 +101,28 @@ pub enum Statement {
     TryStatement(TryStatement),
     WhileStatement(WhileStatement),
     ForStatement(ForStatement),
+}
+
+impl Statement {
+    pub fn loc(&self) -> Option<SourceLocation> {
+        match self {
+            Statement::ExpressionStatement(s) => s.loc,
+            Statement::BlockStatement(s) => s.loc,
+            Statement::EmptyStatement(s) => s.loc,
+            Statement::Declaration(s) => s.loc(),
+            Statement::IfStatement(s) => s.loc,
+            Statement::ReturnStatement(s) => s.loc,
+            Statement::ThrowStatement(s) => s.loc,
+            Statement::TryStatement(s) => s.loc,
+            Statement::WhileStatement(s) => s.loc,
+            Statement::ForStatement(s) => s.loc,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyStatement {
+    pub loc: Option<SourceLocation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +135,15 @@ pub struct ExpressionStatement {
 pub enum Declaration {
     VariableDeclaration(VariableDeclaration),
     FunctionDeclaration(FunctionDeclaration),
+}
+
+impl Declaration {
+    pub fn loc(&self) -> Option<SourceLocation> {
+        match self {
+            Declaration::VariableDeclaration(d) => d.loc,
+            Declaration::FunctionDeclaration(d) => d.loc,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,7 +160,7 @@ pub struct VariableDeclarator {
     pub loc: Option<SourceLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VariableDeclarationKind {
     Var,
 }
@@ -198,7 +240,7 @@ pub enum PropertyKey {
     Identifier(Identifier),
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Eq)]
 pub enum PropertyKind {
     Init,
     Get,
@@ -213,7 +255,7 @@ pub struct BinaryExpression {
     pub loc: Option<SourceLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOperator {
     Add,      // +
     Subtract, // -
@@ -343,7 +385,7 @@ pub struct NewExpression {
     pub loc: Option<SourceLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThisExpression {
     pub loc: Option<SourceLocation>,
 }
@@ -362,7 +404,7 @@ pub enum AssignmentTarget {
     Expression(Expression),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignmentOperator {
     Assign,         // =
     AddAssign,      // +=
@@ -387,7 +429,7 @@ pub struct UnaryExpression {
     pub loc: Option<SourceLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnaryOperator {
     Not, // !
 }
@@ -400,7 +442,7 @@ pub struct LogicalExpression {
     pub loc: Option<SourceLocation>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicalOperator {
     And, // &&
     Or,  // ||

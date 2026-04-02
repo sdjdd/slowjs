@@ -126,7 +126,7 @@ impl Compiler {
                     self.compile_function_declaration(decl)?
                 }
             },
-            Statement::EmptyStatement => {}
+            Statement::EmptyStatement(_) => {}
             Statement::ReturnStatement(stmt) => self.compile_return_statement(stmt)?,
             Statement::BlockStatement(stmt) => self.compile_block_statement(stmt)?,
             Statement::IfStatement(stmt) => self.compile_if_statement(stmt)?,
